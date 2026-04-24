@@ -91,29 +91,21 @@ function getSlaStatus(status, hours) {
 // ─── Desk tickets endpoint (paginado — 1 página por chamada) ─────────
 app.get('/api/desk-page', async (req, res) => {
   try {
-    const status = req.query.status || 'open';
     const from = parseInt(req.query.from) || 0;
-    const limit = 100;
-    const noDept = req.query.nodept === '1';
+    const limit = 50;
 
     const token = await getDeskToken();
     const deptId = process.env.ZOHO_DEPT_ID;
 
-    const params = { limit, from, status, include: 'assignee' };
-    if (!noDept) params.departmentId = deptId;
-
     await delay(150);
-    const response = await axios.get('https://desk.zoho.com/api/v1/tickets', {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params
-    });
+    const response = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
 
-    // Debug: retorna resposta bruta se vazio
-    if (!response.data.data || response.data.data.length === 0) {
-      return res.json({ tickets: [], hasMore: false, nextFrom: from + limit, status, debug: response.data });
-    }
+    const allData = response.data.data || [];
 
-    const tickets = (response.data.data || []).map(t => ({
+    const tickets = allData.map(t => ({
       id: t.id,
       ticketNumber: t.ticketNumber,
       subject: t.subject,
@@ -130,9 +122,9 @@ app.get('/api/desk-page', async (req, res) => {
 
     res.json({
       tickets,
-      hasMore: tickets.length === limit,
+      hasMore: allData.length === limit,
       nextFrom: from + limit,
-      status
+      debug: allData.length === 0 ? response.data : undefined
     });
   } catch (e) {
     res.status(500).json({ error: e.message, detail: e.response?.data, status_code: e.response?.status });
