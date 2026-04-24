@@ -648,43 +648,63 @@ function palette(n) {
   return Array.from({ length: n }, (_, i) => cols[i % cols.length]);
 }
 
-// ─── Load data ───────────────────────────────────────────────────────
-let deskPolling = null;
+// ─── Desk tickets (paginado no frontend) ─────────────────────────────
+let deskTickets = [];
+let deskLoaded = false;
 
-async function loadData() {
+async function fetchDeskPages() {
+  deskTickets = [];
+  deskLoaded = false;
+  document.getElementById('last-update').textContent = '⏳ Carregando Desk...';
+
+  for (const status of ['open', 'closed']) {
+    let from = 0;
+    let hasMore = true;
+    while (hasMore) {
+      try {
+        const res = await fetch(`/api/desk-page?status=${status}&from=${from}`);
+        const data = await res.json();
+        if (data.error) break;
+        deskTickets = deskTickets.concat(data.tickets);
+        hasMore = data.hasMore;
+        from = data.nextFrom;
+        // Atualiza a tela a cada página de abertos para mostrar progresso
+        if (status === 'open') {
+          document.getElementById('last-update').textContent =
+            `⏳ Desk: ${deskTickets.length} tickets carregados...`;
+          if (data.tickets.length > 0) loadReport();
+        }
+      } catch { break; }
+    }
+  }
+
+  deskLoaded = true;
+  loadReport();
+  document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+}
+
+// ─── Load report (processa dados com tickets já carregados) ───────────
+async function loadReport() {
   const from = document.getElementById('date-from').value;
   const to = document.getElementById('date-to').value;
   try {
-    const res = await fetch(`/api/report?from=${from}&to=${to}`);
+    const res = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to, tickets: deskTickets })
+    });
     const data = await res.json();
     state.report = data;
-    document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-    renderAll(data);
-
-    // Se Desk ainda nao carregou, faz polling silencioso sem recarregar a tela
-    if (!data.dataStatus.desk) {
-      document.getElementById('last-update').textContent = '⏳ Carregando Desk...';
-      if (!deskPolling) {
-        deskPolling = setInterval(async () => {
-          try {
-            const r2 = await fetch(`/api/report?from=${from}&to=${to}`);
-            const d2 = await r2.json();
-            if (d2.dataStatus.desk) {
-              clearInterval(deskPolling);
-              deskPolling = null;
-              state.report = d2;
-              document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-              renderAll(d2);
-            }
-          } catch {}
-        }, 15000);
-      }
-    } else {
-      if (deskPolling) { clearInterval(deskPolling); deskPolling = null; }
+    if (deskLoaded) {
+      document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
     }
-  } catch (e) {
-    console.error('Erro ao carregar dados:', e);
-  }
+    renderAll(data);
+  } catch (e) { console.error('Erro ao carregar report:', e); }
+}
+
+async function loadData() {
+  await loadReport();       // Carrega RMA/Spare Parts imediatamente
+  fetchDeskPages();          // Busca Desk em paralelo paginado
 }
 
 function renderAll(d) {
