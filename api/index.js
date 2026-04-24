@@ -6,16 +6,15 @@ const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
-
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// ─── Supabase helpers ────────────────────────────────────────────────
+// ─── Supabase ────────────────────────────────────────────────────────
 const SUPA_URL = process.env.SUPABASE_URL;
 const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 async function dbGet(key) {
   try {
-    const res = await axios.get(`${SUPA_URL}/rest/v1/ast_storage?key=eq.${key}&select=value,updated_at`, {
+    const res = await axios.get(`${SUPA_URL}/rest/v1/ast_storage?key=eq.${encodeURIComponent(key)}&select=value,updated_at`, {
       headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
     });
     if (res.data && res.data.length > 0) {
@@ -31,10 +30,8 @@ async function dbSet(key, value) {
       key, value: JSON.stringify(value), updated_at: new Date().toISOString()
     }, {
       headers: {
-        apikey: SUPA_KEY,
-        Authorization: `Bearer ${SUPA_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates'
+        apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`,
+        'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
       }
     });
     return true;
@@ -43,7 +40,7 @@ async function dbSet(key, value) {
 
 // ─── In-memory cache ─────────────────────────────────────────────────
 let memCache = {
-  desk: { data: null, ts: 0 },
+  desk: { data: null, ts: 0, updated_at: null },
   rma: { data: null, ts: 0, updated_at: null },
   sankhya: { data: null, ts: 0, updated_at: null },
   sheets: { data: null, ts: 0, updated_at: null },
@@ -52,7 +49,7 @@ let memCache = {
 const MEM_TTL = 10 * 60 * 1000;
 const DESK_TTL = 2 * 60 * 60 * 1000;
 
-// ─── Zoho Desk Auth ──────────────────────────────────────────────────
+// ─── Zoho Auth ───────────────────────────────────────────────────────
 let deskToken = { access_token: null, expires_at: 0 };
 
 async function getDeskToken() {
@@ -70,51 +67,128 @@ async function getDeskToken() {
   return deskToken.access_token;
 }
 
-async function fetchDeskTickets() {
-  if (memCache.desk.data && Date.now() - memCache.desk.ts < DESK_TTL) return memCache.desk.data;
+// ─── Fetch ALL tickets (open + closed) with status time history ──────
+async function fetchAllDeskTickets() {
+  // Use cached if fresh
+  if (memCache.desk.data && Date.now() - memCache.desk.ts < DESK_TTL) {
+    return memCache.desk.data;
+  }
+
+  // Try Supabase cache first
+  const cached = await dbGet('desk_tickets');
+  if (cached.value && cached.updated_at) {
+    const age = Date.now() - new Date(cached.updated_at).getTime();
+    if (age < DESK_TTL) {
+      memCache.desk = { data: cached.value, ts: Date.now(), updated_at: cached.updated_at };
+      return cached.value;
+    }
+  }
 
   const token = await getDeskToken();
   const deptId = process.env.ZOHO_DEPT_ID;
-  let all = [], from = 0;
-  const limit = 100;
+  const delay = ms => new Promise(r => setTimeout(r, ms));
 
-  while (true) {
-    await new Promise(r => setTimeout(r, 150));
-    const res = await axios.get('https://desk.zoho.com/api/v1/tickets', {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params: { departmentId: deptId, limit, from, include: 'assignee' }
-    });
-    const tickets = res.data.data || [];
-    all = all.concat(tickets);
-    if (tickets.length < limit) break;
-    from += limit;
+  // Fetch open tickets
+  let allTickets = [];
+  for (const status of ['open', 'closed']) {
+    let from = 0;
+    const limit = 100;
+    while (true) {
+      await delay(200);
+      try {
+        const res = await axios.get('https://desk.zoho.com/api/v1/tickets', {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          params: { departmentId: deptId, limit, from, status, include: 'assignee' }
+        });
+        const tickets = res.data.data || [];
+        allTickets = allTickets.concat(tickets.map(t => ({ ...t, _fetchStatus: status })));
+        if (tickets.length < limit) break;
+        from += limit;
+      } catch (e) { console.error(`Error fetching ${status} tickets:`, e.message); break; }
+    }
   }
 
+  // Enrich with status time history
   const enriched = [];
-  for (const t of all) {
-    await new Promise(r => setTimeout(r, 150));
+  for (const t of allTickets) {
+    await delay(200);
     try {
       const hist = await axios.get(`https://desk.zoho.com/api/v1/tickets/${t.id}/History`, {
         headers: { Authorization: `Zoho-oauthtoken ${token}` }
       });
-      const history = hist.data.data || [];
-      const currentStatusEntry = [...history].reverse().find(h => h.fieldName === 'Status' && h.to === t.status);
-      const statusSince = currentStatusEntry ? new Date(currentStatusEntry.modifiedTime) : new Date(t.createdTime);
-      const hoursInStatus = (Date.now() - statusSince.getTime()) / 3600000;
-      enriched.push({ ...t, statusSince: statusSince.toISOString(), hoursInStatus });
+      const history = (hist.data.data || []).filter(h => h.fieldName === 'Status');
+
+      // Calculate time spent in each status
+      const statusTimes = {}; // { statusName: totalHours }
+      const sortedHistory = [...history].sort((a, b) => new Date(a.modifiedTime) - new Date(b.modifiedTime));
+
+      for (let i = 0; i < sortedHistory.length; i++) {
+        const entry = sortedHistory[i];
+        const statusName = entry.to;
+        const startTime = new Date(entry.modifiedTime);
+        const endTime = i < sortedHistory.length - 1
+          ? new Date(sortedHistory[i + 1].modifiedTime)
+          : (t.closedTime ? new Date(t.closedTime) : new Date());
+        const hours = (endTime - startTime) / 3600000;
+        if (hours > 0 && hours < 8760) { // ignore > 1 year (data anomaly)
+          statusTimes[statusName] = (statusTimes[statusName] || 0) + hours;
+        }
+      }
+
+      // Current status time
+      const lastStatusEntry = sortedHistory[sortedHistory.length - 1];
+      const currentStatusSince = lastStatusEntry ? new Date(lastStatusEntry.modifiedTime) : new Date(t.createdTime);
+      const hoursInCurrentStatus = (Date.now() - currentStatusSince.getTime()) / 3600000;
+
+      enriched.push({
+        id: t.id,
+        ticketNumber: t.ticketNumber,
+        subject: t.subject,
+        status: t.status,
+        assigneeName: t.assignee?.name || 'Sem agente',
+        createdTime: t.createdTime,
+        closedTime: t.closedTime || null,
+        statusSince: currentStatusSince.toISOString(),
+        hoursInCurrentStatus,
+        statusTimes, // time spent in each status (historical)
+        totalHours: t.closedTime
+          ? (new Date(t.closedTime) - new Date(t.createdTime)) / 3600000
+          : hoursInCurrentStatus
+      });
     } catch {
-      enriched.push({ ...t, statusSince: t.createdTime, hoursInStatus: 0 });
+      enriched.push({
+        id: t.id,
+        ticketNumber: t.ticketNumber,
+        subject: t.subject,
+        status: t.status,
+        assigneeName: t.assignee?.name || 'Sem agente',
+        createdTime: t.createdTime,
+        closedTime: t.closedTime || null,
+        statusSince: t.createdTime,
+        hoursInCurrentStatus: 0,
+        statusTimes: {},
+        totalHours: 0
+      });
     }
   }
 
-  memCache.desk = { data: enriched, ts: Date.now() };
+  // Save to Supabase
+  const updated_at = new Date().toISOString();
+  await dbSet('desk_tickets', enriched);
+  memCache.desk = { data: enriched, ts: Date.now(), updated_at };
   return enriched;
 }
 
+// ─── SLA map ─────────────────────────────────────────────────────────
 const SLA = {
-  'Aguardando Teste': 72, 'Em Teste': 6, 'Em Manutenção': 24,
-  'Aguardando Peça Reposição': 1080, 'Ag. Aprovação Manutenção SG': 48,
-  'Em Tratativa Devolução Cliente': 48, 'Aguardando Manutenção SG': 24, 'Aguardando Laudo': 3
+  'Aguardando Teste': 72, 'Ag. teste': 72,
+  'Em Teste': 6, 'Em teste': 6,
+  'Em Manutenção': 24, 'Em manutenção': 24,
+  'Aguardando Peça Reposição': 1080, 'Ag. Peça Reposição': 1080,
+  'Ag. Aprovação Manutenção SG': 48, 'Ag. aprovação manutenção (SG)': 48,
+  'Em Tratativa Devolução Cliente': 48, 'Em tratativa p/ devolução cliente': 48,
+  'Aguardando Manutenção SG': 24,
+  'Aguardando Laudo': 3
 };
 
 function getSlaStatus(status, hoursInStatus) {
@@ -164,19 +238,14 @@ function parseSheetsCsv(buffer) {
   }));
 }
 
-// ─── Load from Supabase with mem cache ──────────────────────────────
 async function getFromDb(key, memKey) {
-  if (memCache[memKey].data && Date.now() - memCache[memKey].ts < MEM_TTL) {
-    return memCache[memKey];
-  }
+  if (memCache[memKey].data && Date.now() - memCache[memKey].ts < MEM_TTL) return memCache[memKey];
   const row = await dbGet(key);
-  if (row.value) {
-    memCache[memKey] = { data: row.value, ts: Date.now(), updated_at: row.updated_at };
-  }
+  if (row.value) memCache[memKey] = { data: row.value, ts: Date.now(), updated_at: row.updated_at };
   return memCache[memKey];
 }
 
-// ─── Routes ──────────────────────────────────────────────────────────
+// ─── Upload routes ───────────────────────────────────────────────────
 app.post('/api/upload/rma', upload.single('file'), async (req, res) => {
   try {
     const data = parseRmaCsv(req.file.buffer);
@@ -215,18 +284,89 @@ app.post('/api/stock-min', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Force refresh desk ──────────────────────────────────────────────
+app.post('/api/refresh-desk', async (req, res) => {
+  try {
+    memCache.desk = { data: null, ts: 0, updated_at: null };
+    await dbSet('desk_tickets', null);
+    res.json({ ok: true, message: 'Cache limpo. Próxima chamada ao /api/report irá rebuscar.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Main report endpoint ────────────────────────────────────────────
 app.get('/api/report', async (req, res) => {
   try {
     const { from, to } = req.query;
     const fromDate = from ? new Date(from) : new Date(0);
     const toDate = to ? new Date(to) : new Date();
 
-    // Desk
-    let deskTickets = [], deskUpdatedAt = null;
+    // Desk tickets (all — open + closed)
+    let allTickets = [], deskUpdatedAt = null;
     try {
-      deskTickets = await fetchDeskTickets();
-      deskUpdatedAt = new Date(memCache.desk.ts).toISOString();
+      allTickets = await fetchAllDeskTickets();
+      deskUpdatedAt = memCache.desk.updated_at || new Date(memCache.desk.ts).toISOString();
     } catch (e) { console.error('Desk error:', e.message); }
+
+    // Filter tickets by period (use createdTime)
+    const periodTickets = allTickets.filter(t => {
+      const d = new Date(t.createdTime);
+      return d >= fromDate && d <= toDate;
+    });
+
+    // Open tickets (for current SLA view)
+    const openTickets = allTickets.filter(t => !t.closedTime);
+
+    // ── SLA atual (tickets abertos) ──
+    const slaByStatus = {}, technicians = {};
+    for (const t of openTickets) {
+      const status = t.status;
+      const agent = t.assigneeName;
+      const slaS = getSlaStatus(status, t.hoursInCurrentStatus || 0);
+      if (!slaByStatus[status]) slaByStatus[status] = { total: 0, ok: 0, atencao: 0, vencido: 0, totalHours: 0 };
+      slaByStatus[status].total++;
+      slaByStatus[status][slaS]++;
+      slaByStatus[status].totalHours += t.hoursInCurrentStatus || 0;
+      if (!technicians[agent]) technicians[agent] = { total: 0, ok: 0, atencao: 0, vencido: 0 };
+      technicians[agent].total++;
+      technicians[agent][slaS]++;
+    }
+
+    // ── Tempo médio por status (histórico — tickets do período) ──
+    const avgTimeByStatus = {}; // { status: { totalHours, count } }
+    for (const t of periodTickets) {
+      for (const [status, hours] of Object.entries(t.statusTimes || {})) {
+        if (!avgTimeByStatus[status]) avgTimeByStatus[status] = { totalHours: 0, count: 0 };
+        avgTimeByStatus[status].totalHours += hours;
+        avgTimeByStatus[status].count++;
+      }
+    }
+    const avgTimeByStatusResult = Object.entries(avgTimeByStatus)
+      .map(([status, v]) => ({
+        status,
+        avgHours: v.count > 0 ? v.totalHours / v.count : 0,
+        count: v.count,
+        sla: SLA[status] || null
+      }))
+      .sort((a, b) => b.avgHours - a.avgHours);
+
+    // ── Tempo médio por técnico (histórico) ──
+    const avgTimeByAgent = {};
+    for (const t of periodTickets) {
+      const agent = t.assigneeName;
+      if (!avgTimeByAgent[agent]) avgTimeByAgent[agent] = { totalHours: 0, count: 0, closed: 0 };
+      avgTimeByAgent[agent].totalHours += t.totalHours || 0;
+      avgTimeByAgent[agent].count++;
+      if (t.closedTime) avgTimeByAgent[agent].closed++;
+    }
+
+    // ── Tendência mensal (tickets abertos/fechados por mês) ──
+    const monthlyTrend = {};
+    for (const t of periodTickets) {
+      const month = t.createdTime?.substring(0, 7) || 'N/A';
+      if (!monthlyTrend[month]) monthlyTrend[month] = { opened: 0, closed: 0 };
+      monthlyTrend[month].opened++;
+      if (t.closedTime) monthlyTrend[month].closed++;
+    }
 
     // RMA
     const rmaCache = await getFromDb('rma', 'rma');
@@ -235,11 +375,8 @@ app.get('/api/report', async (req, res) => {
       return d >= fromDate && d <= toDate;
     });
 
-    // Sankhya
+    // Sankhya + Spare parts
     const sankhyaCache = await getFromDb('sankhya', 'sankhya');
-    const sankhya = sankhyaCache.data || [];
-
-    // Spare parts + stock min
     const sheetsCache = await getFromDb('spare_parts', 'sheets');
     const stockMinCache = await getFromDb('stock_min', 'stockMin');
     const stockMins = stockMinCache.data || {};
@@ -248,21 +385,6 @@ app.get('/api/report', async (req, res) => {
       minStock: stockMins[p.sku] || 0,
       alert: p.quantidade <= (stockMins[p.sku] || 0) && (stockMins[p.sku] || 0) > 0
     }));
-
-    // Desk SLA
-    const slaByStatus = {}, technicians = {};
-    for (const t of deskTickets) {
-      const status = t.status;
-      const agent = t.assignee?.name || 'Sem agente';
-      const slaS = getSlaStatus(status, t.hoursInStatus || 0);
-      if (!slaByStatus[status]) slaByStatus[status] = { total: 0, ok: 0, atencao: 0, vencido: 0, totalHours: 0 };
-      slaByStatus[status].total++;
-      slaByStatus[status][slaS]++;
-      slaByStatus[status].totalHours += t.hoursInStatus || 0;
-      if (!technicians[agent]) technicians[agent] = { total: 0, ok: 0, atencao: 0, vencido: 0 };
-      technicians[agent].total++;
-      technicians[agent][slaS]++;
-    }
 
     // RMA processing
     const productCount = {}, faultCount = {}, lineCount = {}, serviceCount = {};
@@ -308,14 +430,28 @@ app.get('/api/report', async (req, res) => {
     res.json({
       updatedAt: new Date().toISOString(),
       period: { from: fromDate.toISOString(), to: toDate.toISOString() },
-      desk: { total: deskTickets.length, slaByStatus, byTechnician: technicians, tickets: deskTickets.slice(0, 200), updatedAt: deskUpdatedAt },
+      desk: {
+        total: openTickets.length,
+        totalHistorico: periodTickets.length,
+        totalClosed: periodTickets.filter(t => t.closedTime).length,
+        slaByStatus,
+        byTechnician: technicians,
+        avgTimeByStatus: avgTimeByStatusResult,
+        avgTimeByAgent: Object.entries(avgTimeByAgent).map(([name, v]) => ({
+          name, avgHours: v.count > 0 ? v.totalHours / v.count : 0,
+          count: v.count, closed: v.closed
+        })).sort((a, b) => b.count - a.count),
+        monthlyTrend,
+        tickets: openTickets.slice(0, 300),
+        updatedAt: deskUpdatedAt
+      },
       rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption },
       spareParts,
-      sankhya: sankhya.slice(0, 500),
+      sankhya: (sankhyaCache.data || []).slice(0, 500),
       dataStatus: {
-        desk: deskTickets.length > 0,
+        desk: allTickets.length > 0,
         rma: (rmaCache.data || []).length > 0,
-        sankhya: sankhya.length > 0,
+        sankhya: (sankhyaCache.data || []).length > 0,
         spareParts: spareParts.length > 0
       },
       lastUpdated: {
@@ -335,41 +471,14 @@ app.get('/api/status', async (req, res) => {
   const rma = await getFromDb('rma', 'rma');
   const sankhya = await getFromDb('sankhya', 'sankhya');
   const sheets = await getFromDb('spare_parts', 'sheets');
+  const desk = await dbGet('desk_tickets');
   res.json({
-    desk: { loaded: !!memCache.desk.data, count: memCache.desk.data?.length || 0, updatedAt: memCache.desk.ts ? new Date(memCache.desk.ts).toISOString() : null },
-    rma: { loaded: !!(rma.data), count: (rma.data || []).length, updatedAt: rma.updated_at || null },
-    sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at || null },
-    sheets: { loaded: !!(sheets.data), count: (sheets.data || []).length, updatedAt: sheets.updated_at || null }
+    desk: { loaded: !!(desk.value), count: (desk.value || []).length, updatedAt: desk.updated_at },
+    rma: { loaded: !!(rma.data), count: (rma.data || []).length, updatedAt: rma.updated_at },
+    sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at },
+    sheets: { loaded: !!(sheets.data), count: (sheets.data || []).length, updatedAt: sheets.updated_at }
   });
 });
 
-app.get('/api/debug-desk', async (req, res) => {
-  try {
-    const token = await getDeskToken();
-    const depts = ['365059000000006907','365059000000464053','365059000002932071','365059000041546263','365059000108369079'];
-    const results = {};
-    for (const deptId of depts) {
-      try {
-        const r = await axios.get('https://desk.zoho.com/api/v1/tickets', {
-          headers: { Authorization: `Zoho-oauthtoken ${token}` },
-          params: { limit: 3, departmentId: deptId }
-        });
-        results[deptId] = { count: r.data.data?.length, tickets: r.data.data?.map(t => ({ id: t.ticketNumber, subject: t.subject, status: t.status })) };
-      } catch(e) { results[deptId] = { error: e.message }; }
-      await new Promise(r => setTimeout(r, 200));
-    }
-    // Busca sem dept
-    const r0 = await axios.get('https://desk.zoho.com/api/v1/tickets', {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params: { limit: 5 }
-    });
-    results['sem_dept'] = { count: r0.data.data?.length, tickets: r0.data.data?.map(t => ({ id: t.ticketNumber, dept: t.departmentId, status: t.status })) };
-    res.json(results);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 app.use(express.static(path.join(__dirname, '../public')));
-
 module.exports = app;
