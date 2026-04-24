@@ -89,20 +89,23 @@ function getSlaStatus(status, hours) {
 }
 
 // ─── Desk tickets endpoint (paginado — 1 página por chamada) ─────────
-// O frontend chama isso múltiplas vezes, acumulando os resultados
 app.get('/api/desk-page', async (req, res) => {
   try {
-    const status = req.query.status || 'open'; // open | closed
+    const status = req.query.status || 'open';
     const from = parseInt(req.query.from) || 0;
     const limit = 100;
+    const noDept = req.query.nodept === '1';
 
     const token = await getDeskToken();
     const deptId = process.env.ZOHO_DEPT_ID;
 
+    const params = { limit, from, status, include: 'assignee' };
+    if (!noDept) params.departmentId = deptId;
+
     await delay(150);
     const response = await axios.get('https://desk.zoho.com/api/v1/tickets', {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params: { departmentId: deptId, limit, from, status, include: 'assignee' }
+      params
     });
 
     const tickets = (response.data.data || []).map(t => ({
