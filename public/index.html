@@ -649,9 +649,9 @@ function palette(n) {
 }
 
 // ─── Load data ───────────────────────────────────────────────────────
-let loadingDesk = false;
+let deskPolling = null;
 
-async function loadData(silent = false) {
+async function loadData() {
   const from = document.getElementById('date-from').value;
   const to = document.getElementById('date-to').value;
   try {
@@ -661,13 +661,26 @@ async function loadData(silent = false) {
     document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
     renderAll(data);
 
-    // Se o Desk ainda está carregando, tenta novamente em 10s
-    if (data.deskLoading || (!data.dataStatus.desk && !loadingDesk)) {
-      loadingDesk = true;
+    // Se Desk ainda nao carregou, faz polling silencioso sem recarregar a tela
+    if (!data.dataStatus.desk) {
       document.getElementById('last-update').textContent = '⏳ Carregando Desk...';
-      setTimeout(() => { loadingDesk = false; loadData(true); }, 10000);
+      if (!deskPolling) {
+        deskPolling = setInterval(async () => {
+          try {
+            const r2 = await fetch(`/api/report?from=${from}&to=${to}`);
+            const d2 = await r2.json();
+            if (d2.dataStatus.desk) {
+              clearInterval(deskPolling);
+              deskPolling = null;
+              state.report = d2;
+              document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+              renderAll(d2);
+            }
+          } catch {}
+        }, 15000);
+      }
     } else {
-      loadingDesk = false;
+      if (deskPolling) { clearInterval(deskPolling); deskPolling = null; }
     }
   } catch (e) {
     console.error('Erro ao carregar dados:', e);
