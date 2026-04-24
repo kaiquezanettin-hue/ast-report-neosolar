@@ -82,7 +82,7 @@ async function fetchDeskTickets() {
     await new Promise(r => setTimeout(r, 150));
     const res = await axios.get('https://desk.zoho.com/api/v1/tickets', {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params: { departmentId: deptId, limit, from, status: 'open', include: 'assignee' }
+      params: { departmentId: deptId, limit, from, include: 'assignee' }
     });
     const tickets = res.data.data || [];
     all = all.concat(tickets);
