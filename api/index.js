@@ -135,7 +135,7 @@ app.get('/api/desk-page', async (req, res) => {
       status
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message, detail: e.response?.data, status_code: e.response?.status });
   }
 });
 
