@@ -108,6 +108,11 @@ app.get('/api/desk-page', async (req, res) => {
       params
     });
 
+    // Debug: retorna resposta bruta se vazio
+    if (!response.data.data || response.data.data.length === 0) {
+      return res.json({ tickets: [], hasMore: false, nextFrom: from + limit, status, debug: response.data });
+    }
+
     const tickets = (response.data.data || []).map(t => ({
       id: t.id,
       ticketNumber: t.ticketNumber,
