@@ -346,10 +346,26 @@ app.get('/api/status', async (req, res) => {
 app.get('/api/debug-desk', async (req, res) => {
   try {
     const token = await getDeskToken();
+    // Lista departamentos
     const r1 = await axios.get('https://desk.zoho.com/api/v1/departments', {
       headers: { Authorization: `Zoho-oauthtoken ${token}` }
     });
-    res.json({ departments: r1.data });
+    // Tenta buscar tickets sem filtro de departamento
+    const r2 = await axios.get('https://desk.zoho.com/api/v1/tickets', {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      params: { limit: 5, status: 'open' }
+    });
+    // Tenta buscar com o dept ID configurado
+    const r3 = await axios.get('https://desk.zoho.com/api/v1/tickets', {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      params: { limit: 5, status: 'open', departmentId: process.env.ZOHO_DEPT_ID }
+    }).catch(e => ({ data: { error: e.message } }));
+    res.json({
+      deptId: process.env.ZOHO_DEPT_ID,
+      departments: r1.data.data?.map(d => ({ id: d.id, name: d.name })),
+      ticketsNoDept: { count: r2.data.data?.length, first: r2.data.data?.[0]?.departmentId },
+      ticketsWithDept: r3.data
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
