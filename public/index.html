@@ -649,7 +649,9 @@ function palette(n) {
 }
 
 // ─── Load data ───────────────────────────────────────────────────────
-async function loadData() {
+let loadingDesk = false;
+
+async function loadData(silent = false) {
   const from = document.getElementById('date-from').value;
   const to = document.getElementById('date-to').value;
   try {
@@ -658,6 +660,15 @@ async function loadData() {
     state.report = data;
     document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
     renderAll(data);
+
+    // Se o Desk ainda está carregando, tenta novamente em 10s
+    if (data.deskLoading || (!data.dataStatus.desk && !loadingDesk)) {
+      loadingDesk = true;
+      document.getElementById('last-update').textContent = '⏳ Carregando Desk...';
+      setTimeout(() => { loadingDesk = false; loadData(true); }, 10000);
+    } else {
+      loadingDesk = false;
+    }
   } catch (e) {
     console.error('Erro ao carregar dados:', e);
   }
@@ -1120,8 +1131,8 @@ function renderSourceStatus(ds) {
 setInterval(loadData, 2 * 60 * 60 * 1000);
 
 // ─── INIT ─────────────────────────────────────────────────────────────
-setPeriod(30);
-loadData();
+setPeriodAll(); // Carrega tudo por padrão
+loadData();     // Carrega automaticamente ao abrir a página
 </script>
 </body>
 </html>
