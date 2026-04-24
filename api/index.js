@@ -235,7 +235,11 @@ function parseSheetsCsv(buffer) {
 async function getFromDb(key, memKey) {
   if (memCache[memKey].data && Date.now() - memCache[memKey].ts < MEM_TTL) return memCache[memKey];
   const row = await dbGet(key);
-  if (row.value) memCache[memKey] = { data: row.value, ts: Date.now(), updated_at: row.updated_at };
+  if (row.value) {
+    const actualData = row.value && row.value.data !== undefined ? row.value.data : row.value;
+    const actualUpdatedAt = (row.value && row.value.updated_at) ? row.value.updated_at : row.updated_at;
+    memCache[memKey] = { data: actualData, ts: Date.now(), updated_at: actualUpdatedAt };
+  }
   return memCache[memKey];
 }
 
