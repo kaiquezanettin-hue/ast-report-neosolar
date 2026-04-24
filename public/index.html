@@ -418,31 +418,50 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
 <!-- ═══════════════════════════════════════════════════════ OPERAÇÃO -->
 <div id="tab-operacao" class="tab-content">
   <div class="section-header">Análise Operacional</div>
-
   <div class="kpis" id="kpi-operacao"></div>
-
   <div class="grid2">
     <div class="panel yellow">
-      <div class="panel-title">SLA por Status (Desk)</div>
+      <div class="panel-title">Tempo Médio por Status <span>histórico do período — vs SLA</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-avg-status-hist"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Tendência Mensal <span>tickets abertos vs fechados</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-monthly-trend"></canvas></div>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="panel">
+      <div class="panel-title">SLA Atual por Status <span>tickets abertos agora</span></div>
       <div style="overflow-x:auto;">
         <table class="tbl" id="tbl-sla-status">
           <thead><tr>
             <th>Status</th><th class="num">Total</th><th class="num">✅ OK</th>
-            <th class="num">⚠️ Atenção</th><th class="num">🔴 Vencido</th><th class="num">Tempo Médio</th>
+            <th class="num">⚠️ Atenção</th><th class="num">🔴 Vencido</th><th class="num">Média Atual</th>
           </tr></thead>
           <tbody id="tbody-sla-status"></tbody>
         </table>
       </div>
     </div>
     <div class="panel blue">
-      <div class="panel-title">Atendimentos por Técnico</div>
+      <div class="panel-title">Atendimentos por Técnico <span>tickets abertos agora</span></div>
       <div class="chart-wrap"><canvas id="chart-tech"></canvas></div>
     </div>
   </div>
-
   <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">Performance por Técnico <span>histórico do período</span></div>
+      <div style="overflow-x:auto;">
+        <table class="tbl" id="tbl-tech-hist">
+          <thead><tr>
+            <th>Técnico</th><th class="num">Tickets</th><th class="num">Fechados</th>
+            <th class="num">Lead Time Médio</th><th>% Resolução</th>
+          </tr></thead>
+          <tbody id="tbody-tech-hist"></tbody>
+        </table>
+      </div>
+    </div>
     <div class="panel">
-      <div class="panel-title">Distribuição por Técnico — Detalhe</div>
+      <div class="panel-title">SLA Atual por Técnico <span>tickets abertos agora</span></div>
       <div style="overflow-x:auto;">
         <table class="tbl" id="tbl-tech">
           <thead><tr>
@@ -452,10 +471,6 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
           <tbody id="tbody-tech"></tbody>
         </table>
       </div>
-    </div>
-    <div class="panel red">
-      <div class="panel-title">Tempo Médio por Status</div>
-      <div class="chart-wrap"><canvas id="chart-avg-time"></canvas></div>
     </div>
   </div>
 </div>
@@ -828,15 +843,52 @@ function renderOperacao(d) {
   const totalDesk = desk.total;
   const vencidos = statusEntries.reduce((s, [, v]) => s + v.vencido, 0);
   const emAtencao = statusEntries.reduce((s, [, v]) => s + v.atencao, 0);
+  const historico = desk.totalHistorico || 0;
+  const fechados = desk.totalClosed || 0;
 
   document.getElementById('kpi-operacao').innerHTML = [
-    { val: totalDesk, lbl: 'Tickets Abertos', cls: 'blue' },
+    { val: totalDesk, lbl: 'Tickets Abertos Agora', cls: 'blue' },
+    { val: historico, lbl: 'Tickets no Período', cls: 'yellow' },
+    { val: fechados, lbl: 'Fechados no Período', cls: 'green' },
     { val: vencidos, lbl: 'SLA Vencido', cls: 'red' },
     { val: emAtencao, lbl: 'Em Atenção', cls: 'orange' },
     { val: totalDesk - vencidos - emAtencao, lbl: 'Dentro do SLA', cls: 'green' }
   ].map(k => `<div class="kpi ${k.cls}"><div class="val">${k.val}</div><div class="lbl">${k.lbl}</div></div>`).join('');
 
-  // SLA by status table
+  // Chart: tempo médio histórico por status
+  const avgHist = (desk.avgTimeByStatus || []).filter(a => a.avgHours > 0).slice(0, 12);
+  makeChart('chart-avg-status-hist', {
+    type: 'bar',
+    data: {
+      labels: avgHist.map(a => a.status.replace('Aguardando', 'Ag.').replace('Manutenção', 'Manut.').replace('tratativa p/ devolução cliente', 'Devolução')),
+      datasets: [
+        { label: 'Média Real (h)', data: avgHist.map(a => parseFloat(a.avgHours.toFixed(1))), backgroundColor: C.yellow, borderRadius: 4 },
+        { label: 'SLA (h)', data: avgHist.map(a => a.sla || 0), backgroundColor: 'rgba(224,82,82,0.3)', borderRadius: 4 }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { position: 'bottom' } },
+      scales: { x: { beginAtZero: true, ticks: { callback: v => v + 'h' } } }
+    }
+  });
+
+  // Chart: tendência mensal
+  const trend = desk.monthlyTrend || {};
+  const trendMonths = Object.keys(trend).sort();
+  makeChart('chart-monthly-trend', {
+    type: 'bar',
+    data: {
+      labels: trendMonths,
+      datasets: [
+        { label: 'Abertos', data: trendMonths.map(m => trend[m].opened), backgroundColor: C.blue, borderRadius: 3 },
+        { label: 'Fechados', data: trendMonths.map(m => trend[m].closed), backgroundColor: C.green, borderRadius: 3 }
+      ]
+    },
+    options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+  });
+
+  // SLA by status table (atual)
   document.getElementById('tbody-sla-status').innerHTML = statusEntries.map(([status, v]) => {
     const avg = v.total > 0 ? (v.totalHours / v.total).toFixed(1) : '—';
     return `<tr>
@@ -849,7 +901,7 @@ function renderOperacao(d) {
     </tr>`;
   }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray2);">Sem dados</td></tr>';
 
-  // Chart: by technician
+  // Chart: by technician (atual)
   const techEntries = Object.entries(desk.byTechnician).sort((a, b) => b[1].total - a[1].total).slice(0, 10);
   makeChart('chart-tech', {
     type: 'bar',
@@ -864,7 +916,25 @@ function renderOperacao(d) {
     options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
   });
 
-  // Tech detail table
+  // Tech histórico table
+  const techHist = (desk.avgTimeByAgent || []).slice(0, 10);
+  const elTechHist = document.getElementById('tbody-tech-hist');
+  if (elTechHist) {
+    elTechHist.innerHTML = techHist.map(t => {
+      const resolvePct = t.count > 0 ? Math.round(t.closed/t.count*100) : 0;
+      const cls = resolvePct >= 60 ? 'ok' : resolvePct >= 30 ? 'atencao' : 'vencido';
+      return `<tr>
+        <td style="color:var(--yellow);font-weight:600;">${t.name}</td>
+        <td class="num">${t.count}</td>
+        <td class="num" style="color:var(--green)">${t.closed}</td>
+        <td class="num">${t.avgHours > 0 ? t.avgHours.toFixed(1)+'h' : '—'}</td>
+        <td><div class="prog-bar"><div class="fill ${cls}" style="width:${resolvePct}%"></div></div>
+            <div style="font-size:11px;color:var(--gray2);margin-top:2px;">${resolvePct}% resolvidos</div></td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray2);">Sem dados históricos</td></tr>';
+  }
+
+  // Tech SLA atual table
   document.getElementById('tbody-tech').innerHTML = techEntries.map(([name, v]) => {
     const pct = v.total > 0 ? Math.round(v.ok/v.total*100) : 0;
     const cls = pct >= 80 ? 'ok' : pct >= 60 ? 'atencao' : 'vencido';
@@ -877,17 +947,6 @@ function renderOperacao(d) {
       <td><div class="prog-bar"><div class="fill ${cls}" style="width:${pct}%"></div></div><div style="font-size:11px;color:var(--gray2);margin-top:2px;">${pct}% no prazo</div></td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray2);">Sem dados</td></tr>';
-
-  // Chart: avg time per status
-  const avgTimes = statusEntries.map(([s, v]) => ({ status: s, avg: v.total > 0 ? v.totalHours/v.total : 0 })).sort((a,b) => b.avg - a.avg);
-  makeChart('chart-avg-time', {
-    type: 'bar',
-    data: {
-      labels: avgTimes.map(a => a.status.replace('Aguardando', 'Ag.').replace('Manutenção', 'Manut.')),
-      datasets: [{ label: 'Horas médias', data: avgTimes.map(a => a.avg.toFixed(1)), backgroundColor: palette(avgTimes.length), borderRadius: 4 }]
-    },
-    options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { callback: v => v + 'h' } } } }
-  });
 }
 
 // ─── IMPORTAÇÕES ─────────────────────────────────────────────────────
