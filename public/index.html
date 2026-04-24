@@ -657,25 +657,20 @@ async function fetchDeskPages() {
   deskLoaded = false;
   document.getElementById('last-update').textContent = '⏳ Carregando Desk...';
 
-  for (const status of ['open', 'closed']) {
-    let from = 0;
-    let hasMore = true;
-    while (hasMore) {
-      try {
-        const res = await fetch(`/api/desk-page?status=${status}&from=${from}`);
-        const data = await res.json();
-        if (data.error) break;
-        deskTickets = deskTickets.concat(data.tickets);
-        hasMore = data.hasMore;
-        from = data.nextFrom;
-        // Atualiza a tela a cada página de abertos para mostrar progresso
-        if (status === 'open') {
-          document.getElementById('last-update').textContent =
-            `⏳ Desk: ${deskTickets.length} tickets carregados...`;
-          if (data.tickets.length > 0) loadReport();
-        }
-      } catch { break; }
-    }
+  let from = 0;
+  let hasMore = true;
+  while (hasMore) {
+    try {
+      const res = await fetch(`/api/desk-page?from=${from}`);
+      const data = await res.json();
+      if (data.error) break;
+      deskTickets = deskTickets.concat(data.tickets);
+      hasMore = data.hasMore;
+      from = data.nextFrom;
+      document.getElementById('last-update').textContent =
+        `⏳ Desk: ${deskTickets.length} tickets carregados...`;
+      if (data.tickets.length > 0) loadReport();
+    } catch { break; }
   }
 
   deskLoaded = true;
