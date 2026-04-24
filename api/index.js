@@ -346,26 +346,25 @@ app.get('/api/status', async (req, res) => {
 app.get('/api/debug-desk', async (req, res) => {
   try {
     const token = await getDeskToken();
-    // Lista departamentos
-    const r1 = await axios.get('https://desk.zoho.com/api/v1/departments', {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` }
-    });
-    // Tenta buscar tickets sem filtro de departamento
-    const r2 = await axios.get('https://desk.zoho.com/api/v1/tickets', {
+    const depts = ['365059000000006907','365059000000464053','365059000002932071','365059000041546263','365059000108369079'];
+    const results = {};
+    for (const deptId of depts) {
+      try {
+        const r = await axios.get('https://desk.zoho.com/api/v1/tickets', {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          params: { limit: 3, departmentId: deptId }
+        });
+        results[deptId] = { count: r.data.data?.length, tickets: r.data.data?.map(t => ({ id: t.ticketNumber, subject: t.subject, status: t.status })) };
+      } catch(e) { results[deptId] = { error: e.message }; }
+      await new Promise(r => setTimeout(r, 200));
+    }
+    // Busca sem dept
+    const r0 = await axios.get('https://desk.zoho.com/api/v1/tickets', {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params: { limit: 5, status: 'open' }
+      params: { limit: 5 }
     });
-    // Tenta buscar com o dept ID configurado
-    const r3 = await axios.get('https://desk.zoho.com/api/v1/tickets', {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      params: { limit: 5, status: 'open', departmentId: process.env.ZOHO_DEPT_ID }
-    }).catch(e => ({ data: { error: e.message } }));
-    res.json({
-      deptId: process.env.ZOHO_DEPT_ID,
-      departments: r1.data.data?.map(d => ({ id: d.id, name: d.name })),
-      ticketsNoDept: { count: r2.data.data?.length, first: r2.data.data?.[0]?.departmentId },
-      ticketsWithDept: r3.data
-    });
+    results['sem_dept'] = { count: r0.data.data?.length, tickets: r0.data.data?.map(t => ({ id: t.ticketNumber, dept: t.departmentId, status: t.status })) };
+    res.json(results);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
