@@ -373,7 +373,10 @@ app.post('/api/report', async (req, res) => {
     const topFaults = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
     const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
     // RMA raw para cruzamento com histórico Desk (apenas campos necessários)
-    const rmaRaw = rma.map(r => ({ deskNum: r.deskNum, validation: r.validation }));
+    // rmaRaw usa TODOS os registros (sem filtro de período) para cruzamento com histórico
+    const rmaAllCache = await getFromDb('rma', 'rma');
+    const rmaAll = rmaAllCache.data || [];
+    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime }));
 
     res.json({
       updatedAt: new Date().toISOString(),
