@@ -780,44 +780,82 @@ async function fetchDeskHistory(tickets) {
   historyLoading = true;
   historyLoaded = false;
 
-  // Para o report, considera todos os tickets — filtra por conclusão depois
-  // Um ticket é "concluído" se tem closedTime OU está em status de conclusão
-  const concluidos = tickets.filter(t =>
-    t.closedTime || STATUS_CONCLUIDOS.has(t.status)
-  );
-  // Se não há nenhum concluído, busca todos (histórico incompleto ainda carregando)
-  const ticketsParaBuscar = concluidos.length > 0 ? concluidos : tickets;
+  // Mapa ticketNumber → ticket object (tickets carregados do Desk)
+  const ticketMap = {};
+  for (const t of tickets) ticketMap[String(t.ticketNumber)] = t;
+
+  // RMA como lista completa de tickets que passaram pela AST
+  const rmaRaw = window._rmaRaw || [];
+  const rmaNumeros = [...new Set(rmaRaw.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0'))];
+
+  // Separa: tickets disponíveis no Desk vs tickets antigos só no RMA
+  const comId = [];       // têm ticketId disponível
+  const semId = [];       // só têm ticketNumber, precisam buscar via Search API
+
+  for (const num of rmaNumeros) {
+    const cacheKey = 'rma_' + num;
+    if (deskHistory[cacheKey] || deskHistory[ticketMap[num]?.id]) continue;
+    if (ticketMap[num]) comId.push(ticketMap[num]);
+    else semId.push(num);
+  }
+
+  // Também adiciona tickets Desk em status de conclusão não presentes no RMA
+  for (const t of tickets) {
+    const num = String(t.ticketNumber);
+    if (!rmaNumeros.includes(num) && (t.closedTime || STATUS_CONCLUIDOS.has(t.status)) && !deskHistory[t.id]) {
+      comId.push(t);
+    }
+  }
+
+  const totalParaBuscar = comId.length + semId.length;
   let processed = 0;
+  document.getElementById('last-update').textContent = `⏳ Histórico: 0/${totalParaBuscar} tickets...`;
 
-  document.getElementById('last-update').textContent = `⏳ Histórico: 0/${ticketsParaBuscar.length} tickets...`;
-
-  for (const t of ticketsParaBuscar) {
+  // 1. Busca por ticketId (rápido — já temos o ID)
+  for (const t of comId) {
     if (deskHistory[t.id]) { processed++; continue; }
     try {
       const res = await fetch(`/api/desk-history?ticketId=${t.id}`);
       const data = await res.json();
-      if (!data.error && data.statusTimes) {
-        // Remove status ignorados do statusTimes
-        const filteredTimes = {};
-        for (const [status, hours] of Object.entries(data.statusTimes)) {
-          if (!STATUS_IGNORADOS.has(status)) filteredTimes[status] = hours;
-        }
-        // Só salva se tiver pelo menos 1 status relevante
-        if (Object.keys(filteredTimes).length > 0) {
-          deskHistory[t.id] = {
-            statusTimes: filteredTimes,
-            totalHours: t.totalHours || 0,
-            ticketNumber: t.ticketNumber,
-            assigneeName: t.assigneeName,
-            createdTime: t.createdTime,
-            closedTime: t.closedTime || t.modifiedTime
-          };
-        }
+      if (!data.error && data.statusTimes && Object.keys(data.statusTimes).length > 0) {
+        deskHistory[t.id] = {
+          statusTimes: data.statusTimes,
+          totalHours: t.totalHours || 0,
+          ticketNumber: t.ticketNumber,
+          assigneeName: t.assigneeName,
+          createdTime: t.createdTime,
+          closedTime: t.closedTime || t.modifiedTime
+        };
       }
     } catch {}
     processed++;
     if (processed % 5 === 0) {
-      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${ticketsParaBuscar.length} tickets...`;
+      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${totalParaBuscar} tickets...`;
+      renderSlaReport();
+    }
+  }
+
+  // 2. Busca por ticketNumber (tickets antigos via Search API)
+  for (const num of semId) {
+    const cacheKey = 'rma_' + num;
+    if (deskHistory[cacheKey]) { processed++; continue; }
+    try {
+      const res = await fetch(`/api/desk-history?ticketNumber=${num}`);
+      const data = await res.json();
+      if (!data.error && data.statusTimes && Object.keys(data.statusTimes).length > 0) {
+        deskHistory[cacheKey] = {
+          statusTimes: data.statusTimes,
+          totalHours: 0,
+          ticketNumber: num,
+          assigneeName: 'Sem agente',
+          createdTime: data.createdTime || '',
+          closedTime: data.closedTime || ''
+        };
+      }
+    } catch {}
+    processed++;
+    if (processed % 5 === 0) {
+      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${totalParaBuscar} tickets...`;
       renderSlaReport();
     }
   }
@@ -1025,9 +1063,9 @@ async function fetchDeskPages() {
   }
 
   deskLoaded = true;
-  loadReport();
+  await loadReport(); // espera RMA carregar antes de iniciar histórico
   document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-  // Inicia busca de histórico dos tickets fechados
+  // Inicia busca de histórico — agora _rmaRaw já está disponível
   fetchDeskHistory(deskTickets);
 }
 
