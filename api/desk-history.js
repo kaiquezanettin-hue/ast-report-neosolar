@@ -67,18 +67,16 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Se não encontrou nenhum status, retorna debug
-    if (statusChanges.length === 0) {
-      return res.json({
-        ticketId,
-        statusTimes: {},
-        statusChanges: [],
-        debug: {
-          eventsCount: events.length,
-          firstEvent: events[0] || null
-        }
-      });
-    }
+    // Sempre retorna debug completo
+    return res.json({
+      ticketId,
+      statusTimes,
+      statusChanges,
+      debug: {
+        eventsCount: events.length,
+        events: events.slice(0, 3)
+      }
+    });
 
     res.json({ ticketId, statusTimes, statusChanges });
   } catch (e) {
