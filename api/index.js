@@ -131,6 +131,58 @@ app.get('/api/desk-page', async (req, res) => {
   }
 });
 
+// ─── Desk history endpoint (1 ticket por vez) ────────────────────────
+app.get('/api/desk-history', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+
+    const token = await getDeskToken();
+    await delay(150);
+
+    const hist = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const events = hist.data.data || [];
+    const statusChanges = [];
+
+    for (const e of events) {
+      if (!e.eventInfo) continue;
+      for (const info of e.eventInfo) {
+        if (info.propertyName !== 'Status') continue;
+        const val = info.propertyValue;
+        const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
+        if (toStatus) {
+          statusChanges.push({ status: toStatus, time: e.eventTime });
+        }
+      }
+    }
+
+    // Sort by time
+    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+    // Calculate time spent in each status (in business hours approximation)
+    const statusTimes = {};
+    for (let i = 0; i < statusChanges.length; i++) {
+      const sName = statusChanges[i].status;
+      const start = new Date(statusChanges[i].time);
+      const end = i < statusChanges.length - 1
+        ? new Date(statusChanges[i + 1].time)
+        : new Date();
+      const hours = (end - start) / 3600000;
+      if (hours > 0 && hours < 8760) {
+        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
+      }
+    }
+
+    res.json({ ticketId, statusTimes, statusChanges });
+  } catch (e) {
+    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
+  }
+});
+
 // ─── CSV Parsers ─────────────────────────────────────────────────────
 function parseRmaCsv(buffer) {
   const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
@@ -319,6 +371,8 @@ app.post('/api/report', async (req, res) => {
     const topProducts = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
     const topFaults = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
     const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
+    // RMA raw para cruzamento com histórico Desk (apenas campos necessários)
+    const rmaRaw = rma.map(r => ({ deskNum: r.deskNum, validation: r.validation }));
 
     res.json({
       updatedAt: new Date().toISOString(),
@@ -333,7 +387,7 @@ app.post('/api/report', async (req, res) => {
         })).sort((a, b) => b.count - a.count),
         monthlyTrend
       },
-      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption },
+      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rawRma },
       spareParts,
       sankhya: (sankhyaCache.data || []).slice(0, 500),
       dataStatus: {
@@ -351,6 +405,88 @@ app.post('/api/report', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Histórico de um ticket ───────────────────────────────────────────
+app.get('/api/desk-history', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+    const token = await getDeskToken();
+    await delay(150);
+    const hist = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const events = hist.data.data || [];
+    // Tenta dois formatos de histórico do Zoho
+    let statusChanges = [];
+    for (const e of events) {
+      // Formato 1: fieldName/from/to (novo)
+      if (e.fieldName === 'Status' && e.to) {
+        statusChanges.push({ status: e.to, time: e.modifiedTime });
+      }
+      // Formato 2: eventInfo (antigo)
+      if (e.eventInfo) {
+        for (const info of e.eventInfo) {
+          if (info.propertyName !== 'Status') continue;
+          const val = info.propertyValue;
+          const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
+          if (toStatus) statusChanges.push({ status: toStatus, time: e.eventTime });
+        }
+      }
+    }
+
+    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+    // Calcula tempo em cada status
+    const statusTimes = {};
+    for (let i = 0; i < statusChanges.length; i++) {
+      const sName = statusChanges[i].status;
+      const start = new Date(statusChanges[i].time);
+      const end = i < statusChanges.length - 1
+        ? new Date(statusChanges[i + 1].time)
+        : new Date();
+      const hours = (end - start) / 3600000;
+      if (hours > 0 && hours < 8760) {
+        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
+      }
+    }
+
+    res.json({ ticketId, statusTimes, statusChanges });
+  } catch (e) {
+    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
+  }
+});
+
+// ─── Histórico de um ticket (para calcular lead time por status) ──────
+app.get('/api/desk-history', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId obrigatório' });
+
+    const token = await getDeskToken();
+    await delay(150);
+    const r = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const events = r.data.data || [];
+    // Filtra só eventos de mudança de status
+    const statusEvents = events.filter(e => {
+      if (!e.eventInfo) return false;
+      return e.eventInfo.some(i => i.propertyName === 'Status');
+    }).map(e => ({
+      time: e.eventTime,
+      to: e.eventInfo.find(i => i.propertyName === 'Status')?.propertyValue?.updatedValue || null
+    })).filter(e => e.to);
+
+    res.json({ ticketId, statusEvents });
+  } catch (e) {
+    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
 });
 
