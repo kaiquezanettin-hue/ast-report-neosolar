@@ -17,6 +17,15 @@ async function getDeskToken() {
   return zohoToken.access_token;
 }
 
+// Status ignorados no cálculo de lead time
+const STATUS_IGNORADOS = new Set([
+  'Aguardando Chegada de Produto na Neosolar',
+  'Descarte',
+  'Produto despachado AST',
+  'Aguardando Prazo / Autorização Descarte',
+  'Ag. Prazo / Autorização Descarte'
+]);
+
 module.exports = async (req, res) => {
   const { ticketId } = req.query;
   if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
@@ -29,7 +38,7 @@ module.exports = async (req, res) => {
     let from = 0;
     const limit = 50;
     while (true) {
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 100));
       const hist = await axios.get(
         `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=${limit}&from=${from}`,
         { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
@@ -40,7 +49,7 @@ module.exports = async (req, res) => {
       from += limit;
     }
 
-    // Extrai mudanças de status
+    // Extrai mudanças de status (exclui status ignorados)
     let statusChanges = [];
     for (const e of allEvents) {
       if (!e.eventInfo) continue;
@@ -48,7 +57,7 @@ module.exports = async (req, res) => {
         if (info.propertyName === 'Status' && info.propertyValue) {
           const val = info.propertyValue;
           const toStatus = val.updatedValue || (typeof val === 'string' ? val : null);
-          if (toStatus) {
+          if (toStatus && !STATUS_IGNORADOS.has(toStatus)) {
             statusChanges.push({
               status: toStatus,
               from: val.previousValue || null,
@@ -66,6 +75,7 @@ module.exports = async (req, res) => {
     for (let i = 0; i < statusChanges.length; i++) {
       const sName = statusChanges[i].status;
       const start = new Date(statusChanges[i].time);
+      // Próxima mudança de status (pulando ignorados já foram filtrados)
       const end = i < statusChanges.length - 1
         ? new Date(statusChanges[i + 1].time)
         : new Date();
