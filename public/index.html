@@ -767,20 +767,32 @@ const STATUS_IGNORADOS = new Set([
   'Ag. Prazo / Autorização Descarte'
 ]);
 
-// Busca histórico de tickets fechados em background
+// Status que indicam ticket "concluído" para o report
+const STATUS_CONCLUIDOS = new Set([
+  'Descarte',
+  'Produto despachado AST',
+  'Produto despachado',
+]);
+
+// Busca histórico de tickets concluídos em background
 async function fetchDeskHistory(tickets) {
   if (historyLoading) return;
   historyLoading = true;
   historyLoaded = false;
 
-  // Busca todos os tickets fechados (filtra status ignorados só no cálculo)
-  const fechados = tickets.filter(t => t.closedTime);
+  // Para o report, considera todos os tickets — filtra por conclusão depois
+  // Um ticket é "concluído" se tem closedTime OU está em status de conclusão
+  const concluidos = tickets.filter(t =>
+    t.closedTime || STATUS_CONCLUIDOS.has(t.status)
+  );
+  // Se não há nenhum concluído, busca todos (histórico incompleto ainda carregando)
+  const ticketsParaBuscar = concluidos.length > 0 ? concluidos : tickets;
   let processed = 0;
 
-  document.getElementById('last-update').textContent = `⏳ Histórico: 0/${fechados.length} tickets...`;
+  document.getElementById('last-update').textContent = `⏳ Histórico: 0/${ticketsParaBuscar.length} tickets...`;
 
-  for (const t of fechados) {
-    if (deskHistory[t.id]) { processed++; continue; } // já tem cache
+  for (const t of ticketsParaBuscar) {
+    if (deskHistory[t.id]) { processed++; continue; }
     try {
       const res = await fetch(`/api/desk-history?ticketId=${t.id}`);
       const data = await res.json();
@@ -790,20 +802,23 @@ async function fetchDeskHistory(tickets) {
         for (const [status, hours] of Object.entries(data.statusTimes)) {
           if (!STATUS_IGNORADOS.has(status)) filteredTimes[status] = hours;
         }
-        deskHistory[t.id] = {
-          statusTimes: filteredTimes,
-          totalHours: t.totalHours || 0,
-          ticketNumber: t.ticketNumber,
-          assigneeName: t.assigneeName,
-          createdTime: t.createdTime,
-          closedTime: t.closedTime
-        };
+        // Só salva se tiver pelo menos 1 status relevante
+        if (Object.keys(filteredTimes).length > 0) {
+          deskHistory[t.id] = {
+            statusTimes: filteredTimes,
+            totalHours: t.totalHours || 0,
+            ticketNumber: t.ticketNumber,
+            assigneeName: t.assigneeName,
+            createdTime: t.createdTime,
+            closedTime: t.closedTime || t.modifiedTime
+          };
+        }
       }
     } catch {}
     processed++;
-    if (processed % 10 === 0) {
-      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${fechados.length} tickets...`;
-      renderSlaReport(); // atualiza progressivamente
+    if (processed % 5 === 0) {
+      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${ticketsParaBuscar.length} tickets...`;
+      renderSlaReport();
     }
   }
 
@@ -837,6 +852,8 @@ function renderSlaReport() {
   to.setHours(23, 59, 59);
 
   const histEntries = Object.values(deskHistory).filter(h => {
+    // Só inclui tickets que têm statusTimes relevantes (passaram por status de análise)
+    if (!h.statusTimes || Object.keys(h.statusTimes).length === 0) return false;
     const d = new Date(h.createdTime);
     if (d < from || d > to) return false;
     if (filtroGarantia === 'todos') return true;
