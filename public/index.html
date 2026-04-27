@@ -339,6 +339,7 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
   <button class="tab" onclick="switchTab('produtos')">📦 Produtos</button>
   <button class="tab" onclick="switchTab('operacao')">⚙️ Operação</button>
   <button class="tab" onclick="switchTab('importacoes')">🔩 Importações</button>
+  <button class="tab" onclick="switchTab('sla')">📊 SLA & Lead Time</button>
   <button class="tab" onclick="switchTab('dados')">📁 Dados</button>
 </div>
 
@@ -527,6 +528,54 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════ SLA & LEAD TIME -->
+<div id="tab-sla" class="tab-content">
+  <div class="section-header">SLA & Lead Time por Status</div>
+
+  <!-- Filtro de garantia + KPIs -->
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label style="font-size:12px;color:var(--gray2);">Tipo:</label>
+      <select id="filtro-garantia" onchange="renderSlaReport()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+        <option value="todos">Todos</option>
+        <option value="garantia">Em Garantia</option>
+        <option value="fora">Fora de Garantia</option>
+        <option value="manutencao">Manutenção Paga</option>
+      </select>
+    </div>
+    <div class="kpi yellow" id="kpi-sla-geral" style="min-width:140px;flex:none;"><div class="val">—</div><div class="lbl">% Conclusão SLA Geral</div></div>
+    <div class="kpi blue" id="kpi-sla-tickets" style="min-width:120px;flex:none;"><div class="val">0</div><div class="lbl">Tickets com Histórico</div></div>
+    <div class="kpi" id="kpi-sla-loading" style="min-width:140px;flex:none;"><div class="val" style="font-size:16px;">0/0</div><div class="lbl">Histórico Carregado</div></div>
+    <p style="font-size:11px;color:var(--gray2);margin-left:auto;">As médias de lead time estão em dias úteis (1 dia = 8h). Cruzamento com RMA para filtro de garantia.</p>
+  </div>
+
+  <!-- Tabela de lead time por status -->
+  <div class="panel yellow" style="margin-bottom:16px;">
+    <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span></div>
+    <div style="overflow-x:auto;">
+      <table class="tbl" id="tbl-sla-hist">
+        <thead><tr>
+          <th>Subclassificações</th>
+          <th class="num">Média Resolução (dias úteis)</th>
+          <th class="num">% Conclusão SLA</th>
+          <th class="num">SLA Dias Úteis</th>
+          <th class="num">Qtde Casos</th>
+          <th class="num">% Frequência</th>
+        </tr></thead>
+        <tbody id="tbody-sla-hist">
+          <tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguardando carregamento do histórico de tickets...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Gráfico % SLA por mês -->
+  <div class="panel blue">
+    <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
+    <div class="chart-wrap tall"><canvas id="chart-sla-mensal"></canvas></div>
+  </div>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════ DADOS -->
 <div id="tab-dados" class="tab-content">
   <div class="section-header">Gerenciamento de Dados</div>
@@ -652,6 +701,273 @@ function palette(n) {
 let deskTickets = [];
 let deskLoaded = false;
 
+// ─── Histórico de status por ticket ──────────────────────────────────
+// { ticketId: { statusTimes: { statusName: hours }, totalHours } }
+let deskHistory = {};
+let historyLoading = false;
+let historyLoaded = false;
+
+// Mapeamento de status para grupos (igual ao report de referência)
+const STATUS_GRUPOS = {
+  'Aguardando 1º contato - AST': 'ENTRADA',
+  'Pendencia AST - SAC': 'ENTRADA',
+  'Aguardando Classificação': 'ENTRADA',
+  'Aguardando teste': 'AVALIAÇÃO',
+  'Em teste': 'AVALIAÇÃO',
+  'Ag. teste': 'AVALIAÇÃO',
+  'Aguardando aprovaçao de manutençao (SG)': 'TÉCNICO',
+  'Ag. aprovação manutenção (SG)': 'TÉCNICO',
+  'Aguardando manutençao (SG)': 'TÉCNICO',
+  'Em manutençao': 'TÉCNICO',
+  'Em manutenção': 'TÉCNICO',
+  'Aguardando laudo': 'TÉCNICO',
+  'Aguardando RMA': 'TÉCNICO',
+  'Ag. Peça Reposição': 'TÉCNICO',
+  'Aguardando Peça Reposição': 'TÉCNICO',
+  'Em tratativa p/ devoluçao cliente': 'DEVOLUÇÃO',
+  'Em tratativa p/ devolução cliente': 'DEVOLUÇÃO',
+  'Aguardando coleta': 'DEVOLUÇÃO',
+  'Produto despachado AST': 'DEVOLUÇÃO',
+  'Descarte': 'DEVOLUÇÃO',
+  'Ag. Prazo / Autorização Descarte': 'DEVOLUÇÃO',
+  'Aguardando Chegada de Produto na Neosolar': 'ENTRADA'
+};
+
+// SLA em dias úteis por status
+const SLA_DIAS_UTEIS = {
+  'Aguardando 1º contato - AST': 0.5,
+  'Aguardando teste': 3.0,
+  'Em teste': 0.25,
+  'Em manutençao': 0.25,
+  'Em manutenção': 0.25,
+  'Aguardando aprovaçao de manutençao (SG)': 2.0,
+  'Aguardando manutençao (SG)': 1.0,
+  'Aguardando laudo': 0.13,
+  'Aguardando RMA': 0.5,
+  'Ag. Peça Reposição': 0.5,
+  'Aguardando Peça Reposição': 0.5,
+  'Em tratativa p/ devoluçao cliente': 2.0,
+  'Aguardando coleta': 1.0
+};
+
+// Converte horas para dias úteis (~8h/dia)
+function horasParaDiasUteis(horas) {
+  return horas / 8;
+}
+
+// Busca histórico de tickets fechados em background
+async function fetchDeskHistory(tickets) {
+  if (historyLoading) return;
+  historyLoading = true;
+  historyLoaded = false;
+
+  const fechados = tickets.filter(t => t.closedTime);
+  let processed = 0;
+
+  document.getElementById('last-update').textContent = `⏳ Histórico: 0/${fechados.length} tickets...`;
+
+  for (const t of fechados) {
+    if (deskHistory[t.id]) { processed++; continue; } // já tem cache
+    try {
+      const res = await fetch(`/api/desk-history?ticketId=${t.id}`);
+      const data = await res.json();
+      if (!data.error && data.statusTimes) {
+        deskHistory[t.id] = {
+          statusTimes: data.statusTimes,
+          totalHours: t.totalHours || 0,
+          ticketNumber: t.ticketNumber,
+          assigneeName: t.assigneeName,
+          createdTime: t.createdTime,
+          closedTime: t.closedTime
+        };
+      }
+    } catch {}
+    processed++;
+    if (processed % 10 === 0) {
+      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${fechados.length} tickets...`;
+      renderSlaReport(); // atualiza progressivamente
+    }
+  }
+
+  historyLoading = false;
+  historyLoaded = true;
+  document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+  renderSlaReport();
+}
+
+// Renderiza tabela e gráfico de SLA com base no histórico
+function renderSlaReport() {
+  const rmaData = state.report?.rma;
+  const filtroGarantia = document.getElementById('filtro-garantia')?.value || 'todos';
+
+  // Mapa ticket# → tipo de garantia via RMA
+  const rmaMap = {};
+  if (rmaData) {
+    // Precisamos dos dados raw do RMA — buscamos do cache do report
+    (window._rmaRaw || []).forEach(r => {
+      const v = r.validation?.toLowerCase() || '';
+      let tipo = 'warranty';
+      if (v.includes('no warranty maintenance')) tipo = 'maintenance';
+      else if (v.includes('no warranty')) tipo = 'no_warranty';
+      if (r.deskNum) rmaMap[String(r.deskNum).trim()] = tipo;
+    });
+  }
+
+  // Filtra tickets do histórico pelo período e tipo de garantia
+  const from = new Date(document.getElementById('date-from').value);
+  const to = new Date(document.getElementById('date-to').value);
+  to.setHours(23, 59, 59);
+
+  const histEntries = Object.values(deskHistory).filter(h => {
+    const d = new Date(h.createdTime);
+    if (d < from || d > to) return false;
+    if (filtroGarantia === 'todos') return true;
+    const tipo = rmaMap[String(h.ticketNumber)] || 'warranty';
+    if (filtroGarantia === 'garantia') return tipo === 'warranty';
+    if (filtroGarantia === 'fora') return tipo === 'no_warranty';
+    if (filtroGarantia === 'manutencao') return tipo === 'maintenance';
+    return true;
+  });
+
+  const total = histEntries.length;
+
+  // Agrupa por status e calcula métricas
+  const statusMetrics = {}; // { status: { totalDias, count, dentroSla } }
+  for (const h of histEntries) {
+    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
+      if (!statusMetrics[status]) statusMetrics[status] = { totalDias: 0, count: 0, dentroSla: 0 };
+      const dias = horasParaDiasUteis(hours);
+      const slaDias = SLA_DIAS_UTEIS[status];
+      statusMetrics[status].totalDias += dias;
+      statusMetrics[status].count++;
+      if (!slaDias || dias <= slaDias) statusMetrics[status].dentroSla++;
+    }
+  }
+
+  // Monta tabela agrupada
+  const grupos = ['ENTRADA', 'AVALIAÇÃO', 'TÉCNICO', 'DEVOLUÇÃO'];
+  const tblEl = document.getElementById('tbody-sla-hist');
+  if (!tblEl) return;
+
+  let rows = '';
+  for (const grupo of grupos) {
+    // Linha de grupo
+    const statusDoGrupo = Object.entries(statusMetrics).filter(([s]) => STATUS_GRUPOS[s] === grupo);
+    if (statusDoGrupo.length === 0) continue;
+
+    // Métricas agregadas do grupo
+    const grpTotal = statusDoGrupo.reduce((a, [, v]) => a + v.count, 0);
+    const grpDias = statusDoGrupo.reduce((a, [, v]) => a + v.totalDias, 0);
+    const grpDentro = statusDoGrupo.reduce((a, [, v]) => a + v.dentroSla, 0);
+    const grpMediaDias = grpTotal > 0 ? grpDias / grpTotal : 0;
+    const grpSla = grpTotal > 0 ? Math.round(grpDentro / grpTotal * 100) : 0;
+    const grpFreq = total > 0 ? Math.round(grpTotal / total * 100) : 0;
+    const grpColor = grpSla >= 80 ? C.green : grpSla >= 50 ? C.orange : C.red;
+
+    rows += `<tr style="background:rgba(255,255,255,0.05);">
+      <td style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--yellow);">${grupo}</td>
+      <td class="num" style="font-weight:600;">${grpMediaDias.toFixed(2)}</td>
+      <td class="num"><span style="color:${grpColor};font-weight:600;">${grpSla}%</span></td>
+      <td class="num">${statusDoGrupo.map(([s]) => SLA_DIAS_UTEIS[s] || '—').join('/')}</td>
+      <td class="num">${grpTotal}</td>
+      <td class="num">${grpFreq}%</td>
+    </tr>`;
+
+    // Linhas de sub-status
+    for (const [status, v] of statusDoGrupo.sort((a, b) => b[1].count - a[1].count)) {
+      const mediaDias = v.count > 0 ? v.totalDias / v.count : 0;
+      const pctSla = v.count > 0 ? Math.round(v.dentroSla / v.count * 100) : 0;
+      const freq = total > 0 ? Math.round(v.count / total * 100) : 0;
+      const slaDias = SLA_DIAS_UTEIS[status] || null;
+      const color = pctSla >= 80 ? C.green : pctSla >= 50 ? C.orange : C.red;
+      rows += `<tr>
+        <td style="padding-left:20px;color:var(--gray2);">${status}</td>
+        <td class="num">${mediaDias.toFixed(2)}</td>
+        <td class="num"><span style="color:${color};">● ${pctSla}%</span></td>
+        <td class="num">${slaDias || '—'}</td>
+        <td class="num">${v.count}</td>
+        <td class="num">${freq}%</td>
+      </tr>`;
+    }
+  }
+
+  tblEl.innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:var(--gray2);">
+    ${Object.keys(deskHistory).length === 0 ? '⏳ Carregando histórico de tickets...' : 'Sem dados para o período/filtro selecionado'}
+  </td></tr>`;
+
+  // Gráfico % SLA por mês
+  const slaByMonth = {}; // { 'YYYY-MM': { ENTRADA: {dentro,total}, AVALIAÇÃO: ... } }
+  for (const h of histEntries) {
+    const month = h.createdTime?.substring(0, 7) || 'N/A';
+    if (!slaByMonth[month]) slaByMonth[month] = { ENTRADA: {d:0,t:0}, AVALIAÇÃO: {d:0,t:0}, TÉCNICO: {d:0,t:0}, DEVOLUÇÃO: {d:0,t:0} };
+    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
+      const grupo = STATUS_GRUPOS[status];
+      if (!grupo || !slaByMonth[month][grupo]) continue;
+      const dias = horasParaDiasUteis(hours);
+      const slaDias = SLA_DIAS_UTEIS[status];
+      slaByMonth[month][grupo].t++;
+      if (!slaDias || dias <= slaDias) slaByMonth[month][grupo].d++;
+    }
+  }
+
+  const months = Object.keys(slaByMonth).sort();
+  const grupoColors = { ENTRADA: C.green, AVALIAÇÃO: C.blue, TÉCNICO: C.orange, DEVOLUÇÃO: C.purple };
+
+  makeChart('chart-sla-mensal', {
+    type: 'bar',
+    data: {
+      labels: months.map(m => {
+        const [y, mo] = m.split('-');
+        return new Date(y, mo-1).toLocaleString('pt-BR', { month: 'short', year: '2-digit' });
+      }),
+      datasets: [
+        ...grupos.map(g => ({
+          label: g,
+          data: months.map(m => {
+            const v = slaByMonth[m]?.[g];
+            return v && v.t > 0 ? Math.round(v.d/v.t*100) : null;
+          }),
+          backgroundColor: grupoColors[g],
+          borderRadius: 3
+        })),
+        {
+          label: 'Meta (80%)',
+          data: months.map(() => 80),
+          type: 'line',
+          borderColor: C.yellow,
+          borderDash: [5, 5],
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        y: { beginAtZero: true, max: 105, ticks: { callback: v => v + '%' } }
+      }
+    }
+  });
+
+  // KPI histórico
+  const allDentro = Object.values(statusMetrics).reduce((a, v) => a + v.dentroSla, 0);
+  const allTotal = Object.values(statusMetrics).reduce((a, v) => a + v.count, 0);
+  const pctGeral = allTotal > 0 ? Math.round(allDentro/allTotal*100) : 0;
+  const elSlaGeral = document.getElementById('kpi-sla-geral');
+  if (elSlaGeral) {
+    const color = pctGeral >= 80 ? C.green : pctGeral >= 50 ? C.orange : C.red;
+    elSlaGeral.innerHTML = `<div class="val" style="color:${color}">${pctGeral}%</div><div class="lbl">% Conclusão SLA Geral</div>`;
+  }
+  const elSlaTickets = document.getElementById('kpi-sla-tickets');
+  if (elSlaTickets) elSlaTickets.innerHTML = `<div class="val">${total}</div><div class="lbl">Tickets com Histórico</div>`;
+  const elSlaLoading = document.getElementById('kpi-sla-loading');
+  if (elSlaLoading) {
+    const totalFechados = deskTickets.filter(t => t.closedTime).length;
+    elSlaLoading.innerHTML = `<div class="val" style="font-size:16px;">${Object.keys(deskHistory).length}/${totalFechados}</div><div class="lbl">Histórico Carregado</div>`;
+  }
+}
+
 async function fetchDeskPages() {
   deskTickets = [];
   deskLoaded = false;
@@ -676,6 +992,8 @@ async function fetchDeskPages() {
   deskLoaded = true;
   loadReport();
   document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+  // Inicia busca de histórico dos tickets fechados
+  fetchDeskHistory(deskTickets);
 }
 
 // ─── Load report (processa dados com tickets já carregados) ───────────
@@ -693,13 +1011,22 @@ async function loadReport() {
     if (deskLoaded) {
       document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
     }
+    // Salva RMA raw para cruzamento com histórico de garantia
+    if (data.rma?.raw) window._rmaRaw = data.rma.raw;
     renderAll(data);
+    renderSlaReport(); // atualiza SLA com dados disponíveis
   } catch (e) { console.error('Erro ao carregar report:', e); }
 }
 
 async function loadData() {
   await loadReport();       // Carrega RMA/Spare Parts imediatamente
   fetchDeskPages();          // Busca Desk em paralelo paginado
+}
+
+// Salva raw RMA para cruzamento com histórico
+function saveRmaRaw(reportData) {
+  // Reconstruímos o raw a partir dos dados processados disponíveis
+  window._rmaRaw = window._rmaRaw || [];
 }
 
 function renderAll(d) {
