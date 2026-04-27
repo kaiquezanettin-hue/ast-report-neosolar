@@ -421,7 +421,12 @@ app.get('/api/desk-history', async (req, res) => {
     );
 
     const events = hist.data.data || [];
-    // Tenta dois formatos de histórico do Zoho
+    // Debug: retorna estrutura bruta se vazio
+    if (events.length === 0) {
+      return res.json({ ticketId, statusTimes: {}, statusChanges: [], debug: { raw: hist.data, count: 0 } });
+    }
+    // Log primeiro evento para debug
+    const firstEvent = events[0];
     let statusChanges = [];
     for (const e of events) {
       // Formato 1: fieldName/from/to (novo)
@@ -437,6 +442,9 @@ app.get('/api/desk-history', async (req, res) => {
           if (toStatus) statusChanges.push({ status: toStatus, time: e.eventTime });
         }
       }
+    }
+    if (statusChanges.length === 0) {
+      return res.json({ ticketId, statusTimes: {}, statusChanges: [], debug: { firstEvent, totalEvents: events.length } });
     }
 
     statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
