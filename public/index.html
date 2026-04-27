@@ -1629,6 +1629,7 @@ function renderProdutos(d) {
   const toDateProd = new Date(document.getElementById('date-to').value);
   toDateProd.setHours(23, 59, 59);
 
+  console.log('RMA sample service:', rmaAll.slice(0,3).map(r => ({service: r.service, addedTime: r.addedTime})));
   for (const r of rmaAll) {
     const d = parseDataBR(r.addedTime);
     if (!d || d < fromDateProd || d > toDateProd) continue;
