@@ -408,7 +408,7 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// ─── Histórico de um ticket ───────────────────────────────────────────
+// ─── Histórico de um ticket ─────────────────────────────────────────── v2
 app.get('/api/desk-history', async (req, res) => {
   try {
     const { ticketId } = req.query;
@@ -419,51 +419,10 @@ app.get('/api/desk-history', async (req, res) => {
       `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
       { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
     );
-
     const events = hist.data.data || [];
-    // Sempre retorna raw para debug temporário
-    return res.json({ ticketId, raw: hist.data, eventsCount: events.length, firstEvent: events[0] || null });
-    // Log primeiro evento para debug
-    const firstEvent = events[0];
-    let statusChanges = [];
-    for (const e of events) {
-      // Formato 1: fieldName/from/to (novo)
-      if (e.fieldName === 'Status' && e.to) {
-        statusChanges.push({ status: e.to, time: e.modifiedTime });
-      }
-      // Formato 2: eventInfo (antigo)
-      if (e.eventInfo) {
-        for (const info of e.eventInfo) {
-          if (info.propertyName !== 'Status') continue;
-          const val = info.propertyValue;
-          const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-          if (toStatus) statusChanges.push({ status: toStatus, time: e.eventTime });
-        }
-      }
-    }
-    if (statusChanges.length === 0) {
-      return res.json({ ticketId, statusTimes: {}, statusChanges: [], debug: { firstEvent, totalEvents: events.length, allEvents: events.slice(0, 3) } });
-    }
-
-    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
-
-    // Calcula tempo em cada status
-    const statusTimes = {};
-    for (let i = 0; i < statusChanges.length; i++) {
-      const sName = statusChanges[i].status;
-      const start = new Date(statusChanges[i].time);
-      const end = i < statusChanges.length - 1
-        ? new Date(statusChanges[i + 1].time)
-        : new Date();
-      const hours = (end - start) / 3600000;
-      if (hours > 0 && hours < 8760) {
-        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
-      }
-    }
-
-    res.json({ ticketId, statusTimes, statusChanges });
+    res.json({ ticketId, version: 2, eventsCount: events.length, raw: events.slice(0, 2) });
   } catch (e) {
-    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
+    res.status(500).json({ error: e.message });
   }
 });
 
