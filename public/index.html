@@ -134,6 +134,7 @@ header {
 
 /* ── MAIN ── */
 main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+.tab-content.fullwidth { margin: 0 -24px; padding: 0 24px; max-width: none; width: calc(100% + 48px); }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -529,7 +530,7 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ SLA & LEAD TIME -->
-<div id="tab-sla" class="tab-content">
+<div id="tab-sla" class="tab-content fullwidth">
   <div class="section-header">SLA & Lead Time por Status</div>
 
   <!-- Filtro de garantia + KPIs -->
@@ -572,7 +573,7 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
   <!-- Gráfico % SLA por mês -->
   <div class="panel blue">
     <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
-    <div class="chart-wrap tall"><canvas id="chart-sla-mensal"></canvas></div>
+    <div class="chart-wrap" style="height:360px;"><canvas id="chart-sla-mensal"></canvas></div>
   </div>
 </div>
 
@@ -784,21 +785,30 @@ async function fetchDeskHistory(tickets) {
   const ticketMap = {};
   for (const t of tickets) ticketMap[String(t.ticketNumber)] = t;
 
-  // RMA filtrado pelos últimos 18 meses pela coluna testDate
+  // RMA filtrado a partir de 01/01/2025
   const rmaRaw = window._rmaRaw || [];
-  const dezoitoMesesAtras = new Date();
-  dezoitoMesesAtras.setMonth(dezoitoMesesAtras.getMonth() - 18);
+  const dataCorte = new Date('2025-01-01');
+
+  function parseDataBR(str) {
+    if (!str) return null;
+    // Tenta DD/MM/YYYY
+    const p = str.trim().split('/');
+    if (p.length === 3) {
+      const d = new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+      if (!isNaN(d)) return d;
+    }
+    // Tenta ISO
+    const d2 = new Date(str);
+    if (!isNaN(d2)) return d2;
+    return null;
+  }
 
   const rmaFiltrado = rmaRaw.filter(r => {
-    if (!r.testDate) return false;
-    // testDate formato DD/MM/YYYY
-    const parts = r.testDate.split('/');
-    if (parts.length !== 3) return false;
-    const d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-    return d >= dezoitoMesesAtras;
+    const d = parseDataBR(r.testDate) || parseDataBR(r.addedTime);
+    return d && d >= dataCorte;
   });
 
-  const rmaNumeros = [...new Set(rmaFiltrado.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0'))];
+  const rmaNumeros = [...new Set(rmaFiltrado.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0' && n.length > 3))];
 
   // Separa: tickets disponíveis no Desk vs tickets antigos só no RMA
   const comId = [];       // têm ticketId disponível
@@ -1043,9 +1053,9 @@ function renderSlaReport() {
     }
   });
 
-  // KPI histórico
+  // KPI histórico — usa tickets únicos por status
   const allDentro = Object.values(statusMetrics).reduce((a, v) => a + v.dentroSla, 0);
-  const allTotal = Object.values(statusMetrics).reduce((a, v) => a + v.count, 0);
+  const allTotal = Object.values(statusMetrics).reduce((a, v) => a + v.ticketsUnicos.size, 0);
   const pctGeral = allTotal > 0 ? Math.round(allDentro/allTotal*100) : 0;
   const elSlaGeral = document.getElementById('kpi-sla-geral');
   if (elSlaGeral) {
