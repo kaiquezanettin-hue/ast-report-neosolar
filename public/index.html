@@ -802,7 +802,7 @@ async function fetchDeskHistory(tickets) {
   const dataCorte = new Date('2025-01-01');
 
   const rmaFiltrado = rmaRaw.filter(r => {
-    const d = parseDataBR(r.testDate) || parseDataBR(r.addedTime);
+    const d = parseDataBR(r.addedTime);
     return d && d >= dataCorte;
   });
 
