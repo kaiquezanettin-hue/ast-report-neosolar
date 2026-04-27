@@ -92,14 +92,16 @@ function getSlaStatus(status, hours) {
 app.get('/api/desk-page', async (req, res) => {
   try {
     const from = parseInt(req.query.from) || 0;
+    const statusFilter = req.query.status || ''; // 'closed' ou vazio para abertos
     const limit = 50;
 
     const token = await getDeskToken();
     const deptId = process.env.ZOHO_DEPT_ID;
 
     await delay(150);
+    const statusParam = statusFilter ? `&status=${statusFilter}` : '';
     const response = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts&status=all`,
+      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts${statusParam}`,
       { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
     );
 
