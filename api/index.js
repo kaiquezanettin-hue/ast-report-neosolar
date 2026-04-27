@@ -157,13 +157,14 @@ function parseSankhyaCsv(buffer) {
 function parseSheetsCsv(buffer) {
   const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
   return records.map(r => ({
+    fornecedor: r['Fornecedor'] || '',
     categoria: r['Categoria'] || '',
     sku: r['SKU'] || '',
     modelo: r['Modelo'] || '',
-    quantidade: parseInt(r['Quantidade']) || 0,
-    saida: parseInt(r['Saida']) || 0,
-    totalFisico: parseInt(r['Total Fisico']) || 0
-  }));
+    quantidade: parseFloat(r['Quantidade']) || 0,
+    saida: parseFloat(r['Saida']) || 0,
+    totalFisico: parseFloat(r['Total Fisico']) || 0
+  })).filter(r => r.sku);
 }
 
 // ─── Supabase loader ─────────────────────────────────────────────────
