@@ -99,7 +99,7 @@ app.get('/api/desk-page', async (req, res) => {
 
     await delay(150);
     const response = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts`,
+      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts&status=all`,
       { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
     );
 
