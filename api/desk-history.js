@@ -74,7 +74,7 @@ module.exports = async (req, res) => {
       statusChanges,
       debug: {
         eventsCount: events.length,
-        events: events.slice(0, 3)
+        events: events
       }
     });
 
