@@ -387,7 +387,7 @@ app.post('/api/report', async (req, res) => {
         })).sort((a, b) => b.count - a.count),
         monthlyTrend
       },
-      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rawRma },
+      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw },
       spareParts,
       sankhya: (sankhyaCache.data || []).slice(0, 500),
       dataStatus: {
