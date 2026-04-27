@@ -807,7 +807,7 @@ async function fetchDeskHistory(tickets) {
   });
 
   const rmaNumeros = [...new Set(rmaFiltrado.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0' && n.length > 3))];
-  console.log('RMA total:', rmaRaw.length, '| Filtrado:', rmaFiltrado.length, '| Números únicos:', rmaNumeros.length, '| Exemplo addedTime:', rmaRaw[0]?.addedTime);
+
 
   // Separa: tickets disponíveis no Desk vs tickets antigos só no RMA
   const comId = [];       // têm ticketId disponível
