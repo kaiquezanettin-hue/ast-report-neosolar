@@ -2,11 +2,13 @@
   "version": 2,
   "builds": [
     { "src": "api/desk-history.js", "use": "@vercel/node" },
+    { "src": "api/desk-ticket.js", "use": "@vercel/node" },
     { "src": "api/index.js", "use": "@vercel/node" },
     { "src": "public/**", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/desk-history", "dest": "/api/desk-history.js" },
+    { "src": "/api/desk-ticket", "dest": "/api/desk-ticket.js" },
     { "src": "/api/(.*)", "dest": "/api/index.js" },
     { "src": "/(.*)", "dest": "/public/$1" }
   ]
