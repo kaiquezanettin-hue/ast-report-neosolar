@@ -432,12 +432,12 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
   <!-- Gráficos de serviço por período -->
   <div class="grid2" style="margin-bottom:16px;">
     <div class="panel yellow">
-      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
-    </div>
-    <div class="panel blue">
       <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
       <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
     </div>
   </div>
 
@@ -1576,13 +1576,13 @@ function renderProdutos(d) {
 
   // Mapeamento de serviço para categoria
   function getServicoCategoria(service) {
-    const s = (service || '').toLowerCase();
-    if (s.includes('flawless')) return 'A - Sem Defeito';
-    if (s.includes('analyze') || s.includes('no service')) return 'B - Sem Serviço';
-    if (s.includes('battery') || s.includes('recharge')) return 'C - Recarga Bateria';
-    if (s.includes('pcb replacement')) return 'D - Subst. PCB';
-    if (s.includes('component')) return 'E - Subst. Componentes';
-    if (s.includes('exchange') || s.includes('troca')) return 'F - Troca de Produto';
+    const s = (service || '').trim();
+    if (s === 'Flawless' || s === 'Firmware Update') return 'A - Sem Defeito';
+    if (s === 'Analyze') return 'B - Sem Serviço';
+    if (s === 'Recharge') return 'C - Recarga Bateria';
+    if (s === 'PCB Replacement') return 'D - Subst. PCB';
+    if (s === 'Component Replacement' || s === 'Component Replacement - dismantle' || s === 'Component Maintenance') return 'E - Subst. Componentes';
+    if (s === 'Product Exchange') return 'F - Troca de Produto';
     return 'B - Sem Serviço';
   }
 
@@ -1601,12 +1601,13 @@ function renderProdutos(d) {
   const trimestreData = {}; // { 'T1 2025': { 'A - Sem Defeito': count, ... } }
   const garantiaTrimestre = {}; // { 'T1 2025': { warranty, noWarranty, maintenance } }
 
-  const fromDate = new Date(document.getElementById('date-from').value);
-  const toDate = new Date(document.getElementById('date-to').value);
+  const fromDateProd = new Date(document.getElementById('date-from').value);
+  const toDateProd = new Date(document.getElementById('date-to').value);
+  toDateProd.setHours(23, 59, 59);
 
   for (const r of rmaAll) {
     const d = parseDataBR(r.addedTime);
-    if (!d || d < fromDate || d > toDate) continue;
+    if (!d || d < fromDateProd || d > toDateProd) continue;
     const trim = getTrimestre(r.addedTime);
     if (!trim) continue;
 
