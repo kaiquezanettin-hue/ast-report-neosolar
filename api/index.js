@@ -99,9 +99,11 @@ app.get('/api/desk-page', async (req, res) => {
     const deptId = process.env.ZOHO_DEPT_ID;
 
     await delay(150);
-    const statusParam = statusFilter ? `&status=${statusFilter}` : '';
+    // Busca por data de criação para pegar tickets antigos
+    const createdBefore = req.query.createdBefore || '';
+    const dateParam = createdBefore ? `&createdTimeRange=${encodeURIComponent(createdBefore)}` : '';
     const response = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts${statusParam}`,
+      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts&sortBy=-createdTime${dateParam}`,
       { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
     );
 
