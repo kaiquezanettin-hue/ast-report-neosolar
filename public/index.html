@@ -1719,7 +1719,7 @@ function renderProdutos(d) {
       centerText: { line1: totalG.toString(), line2: 'Total de Chamados' },
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white, font: { size: 12 } } },
-        tooltip: { callbacks: { label: ctx => \` \${ctx.label}: \${ctx.raw}\` } }
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}` } }
       }
     }
   });
