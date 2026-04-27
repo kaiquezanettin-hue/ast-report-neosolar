@@ -1707,9 +1707,9 @@ function renderProdutos(d) {
     type: 'doughnut',
     data: {
       labels: [
-        \`Garantia (\${totalG > 0 ? Math.round(totalW/totalG*100) : 0}%)\`,
-        \`Sem Garantia (\${totalG > 0 ? Math.round(totalNW/totalG*100) : 0}%)\`,
-        \`Manutenção Paga (\${totalG > 0 ? Math.round(totalM/totalG*100) : 0}%)\`
+        `Garantia (${totalG > 0 ? Math.round(totalW/totalG*100) : 0}%)`,
+        `Sem Garantia (${totalG > 0 ? Math.round(totalNW/totalG*100) : 0}%)`,
+        `Manutenção Paga (${totalG > 0 ? Math.round(totalM/totalG*100) : 0}%)`
       ],
       datasets: [{ data: [totalW, totalNW, totalM], backgroundColor: [C.yellow, C.green, C.orange], borderWidth: 2, borderColor: C.bg2 }]
     },
@@ -1744,7 +1744,7 @@ function renderProdutos(d) {
               const t = trimestres[items[0].dataIndex];
               const tot = (garantiaTrimestre[t]?.warranty||0) + (garantiaTrimestre[t]?.noWarranty||0) + (garantiaTrimestre[t]?.maintenance||0);
               const pct = tot > 0 ? Math.round(items[0].raw/tot*100) : 0;
-              return \`\${pct}% do total\`;
+              return `${pct}% do total`;
             }
           }
         }
