@@ -768,6 +768,18 @@ const STATUS_IGNORADOS = new Set([
   'Ag. Prazo / Autorização Descarte'
 ]);
 
+function parseDataBR(str) {
+  if (!str) return null;
+  const p = str.trim().split('/');
+  if (p.length === 3) {
+    const d = new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+    if (!isNaN(d)) return d;
+  }
+  const d2 = new Date(str);
+  if (!isNaN(d2)) return d2;
+  return null;
+}
+
 // Status que indicam ticket "concluído" para o report
 const STATUS_CONCLUIDOS = new Set([
   'Descarte',
@@ -788,20 +800,6 @@ async function fetchDeskHistory(tickets) {
   // RMA filtrado a partir de 01/01/2025
   const rmaRaw = window._rmaRaw || [];
   const dataCorte = new Date('2025-01-01');
-
-  function parseDataBR(str) {
-    if (!str) return null;
-    // Tenta DD/MM/YYYY
-    const p = str.trim().split('/');
-    if (p.length === 3) {
-      const d = new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
-      if (!isNaN(d)) return d;
-    }
-    // Tenta ISO
-    const d2 = new Date(str);
-    if (!isNaN(d2)) return d2;
-    return null;
-  }
 
   const rmaFiltrado = rmaRaw.filter(r => {
     const d = parseDataBR(r.testDate) || parseDataBR(r.addedTime);
