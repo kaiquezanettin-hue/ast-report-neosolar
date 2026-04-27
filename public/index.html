@@ -709,12 +709,15 @@ let historyLoaded = false;
 
 // Mapeamento de status para grupos (igual ao report de referência)
 const STATUS_GRUPOS = {
+  // ENTRADA
   'Aguardando 1º contato - AST': 'ENTRADA',
   'Pendencia AST - SAC': 'ENTRADA',
   'Aguardando Classificação': 'ENTRADA',
+  // AVALIAÇÃO
   'Aguardando teste': 'AVALIAÇÃO',
   'Em teste': 'AVALIAÇÃO',
   'Ag. teste': 'AVALIAÇÃO',
+  // TÉCNICO
   'Aguardando aprovaçao de manutençao (SG)': 'TÉCNICO',
   'Ag. aprovação manutenção (SG)': 'TÉCNICO',
   'Aguardando manutençao (SG)': 'TÉCNICO',
@@ -724,13 +727,13 @@ const STATUS_GRUPOS = {
   'Aguardando RMA': 'TÉCNICO',
   'Ag. Peça Reposição': 'TÉCNICO',
   'Aguardando Peça Reposição': 'TÉCNICO',
+  // DEVOLUÇÃO (sem Descarte e Produto despachado AST)
   'Em tratativa p/ devoluçao cliente': 'DEVOLUÇÃO',
   'Em tratativa p/ devolução cliente': 'DEVOLUÇÃO',
   'Aguardando coleta': 'DEVOLUÇÃO',
-  'Produto despachado AST': 'DEVOLUÇÃO',
-  'Descarte': 'DEVOLUÇÃO',
   'Ag. Prazo / Autorização Descarte': 'DEVOLUÇÃO',
-  'Aguardando Chegada de Produto na Neosolar': 'ENTRADA'
+  'Aguardando Prazo / Autorização Descarte': 'DEVOLUÇÃO'
+  // IGNORADOS: Aguardando Chegada de Produto na Neosolar, Descarte, Produto despachado AST
 };
 
 // SLA em dias úteis por status
@@ -755,12 +758,22 @@ function horasParaDiasUteis(horas) {
   return horas / 8;
 }
 
+// Status ignorados no histórico e no cálculo de SLA
+const STATUS_IGNORADOS = new Set([
+  'Aguardando Chegada de Produto na Neosolar',
+  'Descarte',
+  'Produto despachado AST',
+  'Aguardando Prazo / Autorização Descarte',
+  'Ag. Prazo / Autorização Descarte'
+]);
+
 // Busca histórico de tickets fechados em background
 async function fetchDeskHistory(tickets) {
   if (historyLoading) return;
   historyLoading = true;
   historyLoaded = false;
 
+  // Busca todos os tickets fechados (filtra status ignorados só no cálculo)
   const fechados = tickets.filter(t => t.closedTime);
   let processed = 0;
 
@@ -772,8 +785,13 @@ async function fetchDeskHistory(tickets) {
       const res = await fetch(`/api/desk-history?ticketId=${t.id}`);
       const data = await res.json();
       if (!data.error && data.statusTimes) {
+        // Remove status ignorados do statusTimes
+        const filteredTimes = {};
+        for (const [status, hours] of Object.entries(data.statusTimes)) {
+          if (!STATUS_IGNORADOS.has(status)) filteredTimes[status] = hours;
+        }
         deskHistory[t.id] = {
-          statusTimes: data.statusTimes,
+          statusTimes: filteredTimes,
           totalHours: t.totalHours || 0,
           ticketNumber: t.ticketNumber,
           assigneeName: t.assigneeName,
