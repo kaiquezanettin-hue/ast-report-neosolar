@@ -40,6 +40,8 @@ header {
   position: sticky;
   top: 0;
   z-index: 100;
+  width: 100%;
+  box-sizing: border-box;
 }
 .header-left { display: flex; align-items: center; gap: 12px; }
 .header-left img { height: 28px; }
@@ -133,11 +135,11 @@ header {
 .tab.active { color: var(--yellow); border-bottom-color: var(--yellow); }
 
 /* ── MAIN ── */
-main { padding: 24px; max-width: 1400px; margin: 0 auto; }
-.tab-content.fullwidth { margin: 0 -24px; padding: 0 24px; max-width: none; width: calc(100vw - 0px); box-sizing: border-box; }
+main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
+.tab-content.fullwidth { margin: 0; padding: 0; width: 100%; }
 .tab-content.fullwidth .panel { border-radius: 4px; }
 .tab-content.fullwidth table { width: 100%; }
-.tab-content.fullwidth th:first-child, .tab-content.fullwidth td:first-child { width: 35%; min-width: 280px; }
+.tab-content.fullwidth th:first-child, .tab-content.fullwidth td:first-child { width: 35%; min-width: 200px; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -146,6 +148,25 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 900px) { .grid2, .grid3, .grid4 { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  header { padding: 0 12px; height: 48px; }
+  header h1 { font-size: 14px; }
+  .header-sep { display: none; }
+  main { padding: 12px; }
+  .period-bar { padding: 8px 12px; gap: 8px; }
+  .tabs { padding: 0 12px; }
+  .kpis { gap: 8px; }
+  .kpi { min-width: 80px; padding: 10px 12px; }
+  .kpi .val { font-size: 22px; }
+  .panel { padding: 12px; }
+  .tab-content.fullwidth th:first-child, .tab-content.fullwidth td:first-child { min-width: 140px; }
+  #clock { font-size: 13px; }
+  .data-status { display: none; }
+}
+@media (min-width: 901px) and (max-width: 1200px) {
+  .grid3 { grid-template-columns: 1fr 1fr; }
+  .grid4 { grid-template-columns: 1fr 1fr; }
+}
 
 /* ── KPI CARDS ── */
 .kpis { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
