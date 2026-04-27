@@ -148,6 +148,8 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 900px) { .grid2, .grid3, .grid4 { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { #histograma-grid { grid-template-columns: 1fr 1fr !important; } }
+@media (max-width: 600px) { #histograma-grid { grid-template-columns: 1fr !important; } }
 @media (max-width: 600px) {
   header { padding: 0 12px; height: 48px; }
   header h1 { font-size: 14px; }
@@ -594,21 +596,31 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
     </div>
   </div>
 
-  <!-- Histograma por macro status -->
-  <div class="panel" style="margin-bottom:16px;">
-    <div class="panel-title">Histograma de Lead Time por Macro Status <span>dias úteis — período selecionado</span>
-      <span style="display:flex;gap:8px;margin-left:auto;">
-        <select id="filtro-hist-grupo" onchange="renderSlaReport()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:3px 8px;border-radius:4px;font-family:var(--font);font-size:12px;">
-          <option value="todos">Todos os grupos</option>
-          <option value="ENTRADA">Entrada</option>
-          <option value="AVALIAÇÃO">Avaliação</option>
-          <option value="PAGAMENTO">Pagamento</option>
-          <option value="TÉCNICO">Técnico</option>
-          <option value="DEVOLUÇÃO">Devolução</option>
-        </select>
-      </span>
+  <!-- Histograma por macro status — cards separados -->
+  <div class="panel-title" style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--gray2);">
+    Histograma de Lead Time por Macro Status <span style="color:var(--yellow);font-size:11px;font-weight:400;margin-left:8px;">dias úteis — período selecionado</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;" id="histograma-grid">
+    <div class="panel" style="border-left-color:var(--green);padding:12px;">
+      <div class="panel-title" style="margin-bottom:8px;">ENTRADA</div>
+      <div style="position:relative;height:220px;"><canvas id="chart-hist-entrada"></canvas></div>
     </div>
-    <div style="position:relative;height:320px;width:100%;"><canvas id="chart-histograma"></canvas></div>
+    <div class="panel" style="border-left-color:var(--blue);padding:12px;">
+      <div class="panel-title" style="margin-bottom:8px;">AVALIAÇÃO</div>
+      <div style="position:relative;height:220px;"><canvas id="chart-hist-avaliacao"></canvas></div>
+    </div>
+    <div class="panel" style="border-left-color:#e0c052;padding:12px;">
+      <div class="panel-title" style="margin-bottom:8px;">PAGAMENTO</div>
+      <div style="position:relative;height:220px;"><canvas id="chart-hist-pagamento"></canvas></div>
+    </div>
+    <div class="panel" style="border-left-color:var(--orange);padding:12px;">
+      <div class="panel-title" style="margin-bottom:8px;">TÉCNICO</div>
+      <div style="position:relative;height:220px;"><canvas id="chart-hist-tecnico"></canvas></div>
+    </div>
+    <div class="panel" style="border-left-color:var(--purple);padding:12px;">
+      <div class="panel-title" style="margin-bottom:8px;">DEVOLUÇÃO</div>
+      <div style="position:relative;height:220px;"><canvas id="chart-hist-devolucao"></canvas></div>
+    </div>
   </div>
 
   <!-- Gráfico % SLA por mês -->
@@ -1183,27 +1195,40 @@ function renderSlaReport() {
   }
 
   const histColors = { ENTRADA: C.green, AVALIAÇÃO: C.blue, PAGAMENTO: '#e0c052', TÉCNICO: C.orange, DEVOLUÇÃO: C.purple };
+  const histCanvasIds = { ENTRADA: 'chart-hist-entrada', AVALIAÇÃO: 'chart-hist-avaliacao', PAGAMENTO: 'chart-hist-pagamento', TÉCNICO: 'chart-hist-tecnico', DEVOLUÇÃO: 'chart-hist-devolucao' };
+  const histGruposAll = ['ENTRADA', 'AVALIAÇÃO', 'PAGAMENTO', 'TÉCNICO', 'DEVOLUÇÃO'];
 
-  makeChart('chart-histograma', {
-    type: 'bar',
-    data: {
-      labels: bucketLabels,
-      datasets: grupos_hist.map(g => ({
-        label: g,
-        data: histData[g],
-        backgroundColor: histColors[g] || C.gray,
-        borderRadius: 2
-      }))
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
-      scales: {
-        x: { title: { display: true, text: 'Dias Úteis', color: C.gray2 } },
-        y: { beginAtZero: true, title: { display: true, text: 'Qtd de Tickets', color: C.gray2 } }
+  for (const g of histGruposAll) {
+    const canvasId = histCanvasIds[g];
+    if (!document.getElementById(canvasId)) continue;
+    const dados = histData[g] || new Array(bucketLabels.length).fill(0);
+    // Remove buckets vazios do final para deixar gráfico mais limpo
+    let lastNonZero = dados.length - 1;
+    while (lastNonZero > 3 && dados[lastNonZero] === 0) lastNonZero--;
+    const dadosTrimmed = dados.slice(0, lastNonZero + 2);
+    const labelsTrimmed = bucketLabels.slice(0, lastNonZero + 2);
+
+    makeChart(canvasId, {
+      type: 'bar',
+      data: {
+        labels: labelsTrimmed,
+        datasets: [{
+          label: g,
+          data: dadosTrimmed,
+          backgroundColor: histColors[g] || C.gray,
+          borderRadius: 3
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 9 }, maxRotation: 45 } },
+          y: { beginAtZero: true, ticks: { font: { size: 10 } } }
+        }
       }
-    }
-  });
+    });
+  }
 
   // Gráfico % SLA por mês
   const slaByMonth = {}; // { 'YYYY-MM': { ENTRADA: {dentro,total}, AVALIAÇÃO: ... } }
