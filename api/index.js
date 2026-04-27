@@ -1,1597 +1,445 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Report AST — NeoSolar</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-:root {
-  --bg: #1c1e20;
-  --bg2: #242628;
-  --bg3: #2c2e30;
-  --border: #353739;
-  --yellow: #FFD04C;
-  --white: #FFFDF0;
-  --gray: #565759;
-  --gray2: #888;
-  --red: #e05252;
-  --green: #52c878;
-  --orange: #e09052;
-  --blue: #5299e0;
-  --purple: #9b59e0;
-  --font: 'Barlow', sans-serif;
-  --fontc: 'Barlow Condensed', sans-serif;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--white); font-family: var(--font); font-size: 14px; min-height: 100vh; }
+const express = require('express');
+const axios = require('axios');
+const multer = require('multer');
+const csv = require('csv-parse/sync');
+const path = require('path');
 
-/* ── HEADER ── */
-header {
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  padding: 0 24px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-.header-left { display: flex; align-items: center; gap: 12px; }
-.header-left img { height: 28px; }
-.header-sep { color: var(--gray); font-size: 18px; }
-.header-left h1 { font-family: var(--fontc); font-size: 18px; font-weight: 600; letter-spacing: 0.5px; color: var(--white); }
-.header-right { display: flex; align-items: center; gap: 16px; }
-#clock { font-family: var(--fontc); font-size: 16px; color: var(--yellow); }
-#last-update { font-size: 11px; color: var(--gray2); }
-.refresh-btn { background: none; border: 1px solid var(--border); color: var(--gray2); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: var(--font); transition: all 0.2s; }
-.refresh-btn:hover { border-color: var(--yellow); color: var(--yellow); }
+const app = express();
+app.use(express.json({ limit: '50mb' }));
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-/* ── PERIOD FILTER ── */
-.period-bar {
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  padding: 10px 24px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.period-bar label { font-size: 12px; color: var(--gray2); }
-.period-bar input[type=date] {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  color: var(--white);
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-family: var(--font);
-  font-size: 13px;
-}
-.period-bar input[type=date]:focus { outline: none; border-color: var(--yellow); }
-.period-shortcuts { display: flex; gap: 6px; }
-.period-shortcuts button {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  color: var(--gray2);
-  padding: 4px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  font-family: var(--font);
-  transition: all 0.2s;
-}
-.period-shortcuts button:hover, .period-shortcuts button.active { background: var(--yellow); color: var(--bg); border-color: var(--yellow); font-weight: 600; }
-.apply-btn {
-  background: var(--yellow);
-  border: none;
-  color: var(--bg);
-  padding: 6px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: var(--fontc);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  transition: opacity 0.2s;
-}
-.apply-btn:hover { opacity: 0.85; }
-.data-status { display: flex; gap: 8px; margin-left: auto; }
-.ds-badge { font-size: 11px; padding: 3px 8px; border-radius: 3px; display: flex; align-items: center; gap: 4px; }
-.ds-badge.ok { background: rgba(82,200,120,0.15); color: var(--green); border: 1px solid rgba(82,200,120,0.3); }
-.ds-badge.missing { background: rgba(224,82,82,0.15); color: var(--red); border: 1px solid rgba(224,82,82,0.3); }
+// ─── Supabase ────────────────────────────────────────────────────────
+const SUPA_URL = process.env.SUPABASE_URL;
+const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-/* ── TABS ── */
-.tabs {
-  display: flex;
-  gap: 0;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  padding: 0 24px;
-  overflow-x: auto;
-}
-.tab {
-  padding: 12px 20px;
-  font-family: var(--fontc);
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-  color: var(--gray2);
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s;
-  background: none;
-  border-left: none;
-  border-right: none;
-  border-top: none;
-}
-.tab:hover { color: var(--white); }
-.tab.active { color: var(--yellow); border-bottom-color: var(--yellow); }
-
-/* ── MAIN ── */
-main { padding: 24px; max-width: 1400px; margin: 0 auto; }
-.tab-content.fullwidth { margin: 0 -24px; padding: 0 24px; max-width: none; width: calc(100% + 48px); }
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-
-/* ── GRID ── */
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 900px) { .grid2, .grid3, .grid4 { grid-template-columns: 1fr; } }
-
-/* ── KPI CARDS ── */
-.kpis { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-.kpi {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--gray);
-  border-radius: 6px;
-  padding: 14px 18px;
-  min-width: 120px;
-  flex: 1;
-}
-.kpi.yellow { border-left-color: var(--yellow); }
-.kpi.green { border-left-color: var(--green); }
-.kpi.red { border-left-color: var(--red); }
-.kpi.blue { border-left-color: var(--blue); }
-.kpi.purple { border-left-color: var(--purple); }
-.kpi.orange { border-left-color: var(--orange); }
-.kpi .val { font-family: var(--fontc); font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
-.kpi .lbl { font-size: 11px; color: var(--gray2); text-transform: uppercase; letter-spacing: 0.5px; }
-
-/* ── PANELS ── */
-.panel {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--gray);
-  border-radius: 6px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-.panel.yellow { border-left-color: var(--yellow); }
-.panel.green { border-left-color: var(--green); }
-.panel.red { border-left-color: var(--red); }
-.panel.blue { border-left-color: var(--blue); }
-.panel-title {
-  font-family: var(--fontc);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: var(--gray2);
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.panel-title span { color: var(--yellow); font-size: 11px; font-weight: 400; }
-.chart-wrap { position: relative; height: 260px; }
-.chart-wrap.tall { height: 320px; }
-
-/* ── TABLE ── */
-.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-.tbl th { font-family: var(--fontc); font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--gray2); padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
-.tbl td { padding: 8px 10px; border-bottom: 1px solid rgba(53,55,57,0.5); }
-.tbl tr:hover td { background: rgba(255,255,255,0.03); }
-.tbl .num { text-align: right; font-family: var(--fontc); }
-.badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-.badge.ok { background: rgba(82,200,120,0.15); color: var(--green); }
-.badge.atencao { background: rgba(224,144,82,0.15); color: var(--orange); }
-.badge.vencido { background: rgba(224,82,82,0.15); color: var(--red); }
-.badge.warranty { background: rgba(82,153,224,0.15); color: var(--blue); }
-.badge.no-warranty { background: rgba(224,82,82,0.15); color: var(--red); }
-.badge.no-warranty-maint { background: rgba(155,89,224,0.15); color: var(--purple); }
-
-/* ── UPLOAD AREA ── */
-.upload-zone {
-  border: 2px dashed var(--border);
-  border-radius: 6px;
-  padding: 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: var(--bg3);
-  margin-bottom: 12px;
-}
-.upload-zone:hover, .upload-zone.dragover { border-color: var(--yellow); background: rgba(255,208,76,0.05); }
-.upload-zone input { display: none; }
-.upload-zone .icon { font-size: 24px; margin-bottom: 6px; }
-.upload-zone p { color: var(--gray2); font-size: 13px; }
-.upload-zone .filename { color: var(--yellow); font-size: 12px; margin-top: 4px; }
-.upload-btn {
-  background: var(--yellow);
-  color: var(--bg);
-  border: none;
-  padding: 8px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: var(--fontc);
-  font-size: 13px;
-  font-weight: 700;
-  margin-top: 8px;
-  transition: opacity 0.2s;
-}
-.upload-btn:hover { opacity: 0.85; }
-.upload-status { font-size: 12px; margin-top: 6px; padding: 4px 8px; border-radius: 3px; }
-.upload-status.ok { background: rgba(82,200,120,0.15); color: var(--green); }
-.upload-status.err { background: rgba(224,82,82,0.15); color: var(--red); }
-
-/* ── STOCK MIN INPUT ── */
-.stock-min-input {
-  width: 60px;
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  color: var(--white);
-  padding: 3px 6px;
-  border-radius: 3px;
-  font-size: 13px;
-  text-align: center;
-}
-.stock-min-input:focus { outline: none; border-color: var(--yellow); }
-.alert-row td { color: var(--red) !important; }
-
-/* ── SECTION HEADER ── */
-.section-header {
-  font-family: var(--fontc);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: var(--white);
-  margin-bottom: 16px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.section-header::before { content: ''; display: inline-block; width: 3px; height: 20px; background: var(--yellow); border-radius: 2px; }
-
-/* ── EMPTY STATE ── */
-.empty { text-align: center; padding: 40px; color: var(--gray2); }
-.empty .icon { font-size: 32px; margin-bottom: 8px; }
-.empty p { font-size: 13px; }
-
-/* ── LOADING ── */
-.loading { text-align: center; padding: 60px; color: var(--gray2); }
-.spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--yellow); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ── TOOLTIP ── */
-.tooltip { position: relative; cursor: help; }
-.tooltip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #111; color: var(--white); padding: 4px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 10; }
-.tooltip:hover::after { opacity: 1; }
-
-/* ── PROGRESS BAR ── */
-.prog-bar { height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; margin-top: 4px; }
-.prog-bar .fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
-.fill.ok { background: var(--green); }
-.fill.atencao { background: var(--orange); }
-.fill.vencido { background: var(--red); }
-
-/* ── HORIZONTAL BAR CHART (custom) ── */
-.hbar-list { display: flex; flex-direction: column; gap: 10px; }
-.hbar-item .label { font-size: 12px; color: var(--gray2); margin-bottom: 3px; display: flex; justify-content: space-between; }
-.hbar-item .label strong { color: var(--white); }
-.hbar-track { height: 8px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
-.hbar-fill { height: 100%; border-radius: 4px; background: var(--yellow); transition: width 0.6s ease; }
-</style>
-</head>
-<body>
-
-<!-- HEADER -->
-<header>
-  <div class="header-left">
-    <img src="https://i.imgur.com/KkLKFkV.png" alt="NeoSolar" onerror="this.style.display='none'"/>
-    <span class="header-sep">/</span>
-    <h1>REPORT ASSISTÊNCIA TÉCNICA</h1>
-  </div>
-  <div class="header-right">
-    <button class="refresh-btn" onclick="loadData()">↻ Atualizar</button>
-    <div id="last-update">—</div>
-    <div id="clock">--:--:--</div>
-  </div>
-</header>
-
-<!-- PERIOD BAR -->
-<div class="period-bar">
-  <label>De</label>
-  <input type="date" id="date-from"/>
-  <label>Até</label>
-  <input type="date" id="date-to"/>
-  <div class="period-shortcuts">
-    <button onclick="setPeriod(7)" id="sh-7">7d</button>
-    <button onclick="setPeriod(30)" id="sh-30" class="active">30d</button>
-    <button onclick="setPeriod(90)" id="sh-90">90d</button>
-    <button onclick="setPeriod(365)" id="sh-365">12m</button>
-    <button onclick="setPeriodAll()" id="sh-all">Tudo</button>
-  </div>
-  <button class="apply-btn" onclick="loadData()">Aplicar</button>
-  <div class="data-status" id="data-status"></div>
-</div>
-
-<!-- TABS -->
-<div class="tabs">
-  <button class="tab active" onclick="switchTab('visao-geral')">Visão Geral</button>
-  <button class="tab" onclick="switchTab('produtos')">📦 Produtos</button>
-  <button class="tab" onclick="switchTab('operacao')">⚙️ Operação</button>
-  <button class="tab" onclick="switchTab('importacoes')">🔩 Importações</button>
-  <button class="tab" onclick="switchTab('sla')">📊 SLA & Lead Time</button>
-  <button class="tab" onclick="switchTab('dados')">📁 Dados</button>
-</div>
-
-<main>
-
-<!-- ═══════════════════════════════════════════════════════ VISÃO GERAL -->
-<div id="tab-visao-geral" class="tab-content active">
-  <div class="kpis" id="kpi-geral"></div>
-
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">Atendimentos por Fornecedor</div>
-      <div class="chart-wrap"><canvas id="chart-line"></canvas></div>
-    </div>
-    <div class="panel blue">
-      <div class="panel-title">Status dos Tickets (Desk)</div>
-      <div class="chart-wrap"><canvas id="chart-desk-status"></canvas></div>
-    </div>
-  </div>
-
-  <div class="grid3">
-    <div class="panel">
-      <div class="panel-title">Distribuição de Garantia</div>
-      <div class="chart-wrap"><canvas id="chart-warranty"></canvas></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">Serviços Realizados</div>
-      <div class="chart-wrap"><canvas id="chart-service"></canvas></div>
-    </div>
-    <div class="panel red">
-      <div class="panel-title">SLA Desk — Visão Geral</div>
-      <div id="sla-summary"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════ PRODUTOS -->
-<div id="tab-produtos" class="tab-content">
-  <div class="section-header">Análise de Produtos</div>
-
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">Top 10 Produtos com Mais Entradas</div>
-      <div id="top-products-list" class="hbar-list"></div>
-    </div>
-    <div class="panel red">
-      <div class="panel-title">Top Defeitos Recorrentes</div>
-      <div id="top-faults-list" class="hbar-list"></div>
-    </div>
-  </div>
-
-  <div class="grid2">
-    <div class="panel blue">
-      <div class="panel-title">Entradas por Linha de Produto</div>
-      <div class="chart-wrap"><canvas id="chart-line2"></canvas></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">Curva ABC de Produtos <span>80% do volume</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-abc"></canvas></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-title">Detalhe de Atendimentos RMA</div>
-    <div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
-      <table class="tbl" id="tbl-rma">
-        <thead><tr>
-          <th>Fornecedor</th><th>Modelo</th><th>SKU</th><th>Defeito</th>
-          <th>Data Teste</th><th>Garantia</th><th>Serviço</th>
-        </tr></thead>
-        <tbody id="tbody-rma"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════ OPERAÇÃO -->
-<div id="tab-operacao" class="tab-content">
-  <div class="section-header">Análise Operacional</div>
-  <div class="kpis" id="kpi-operacao"></div>
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">Tempo Médio por Status <span>histórico do período — vs SLA</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-avg-status-hist"></canvas></div>
-    </div>
-    <div class="panel blue">
-      <div class="panel-title">Tendência Mensal <span>tickets abertos vs fechados</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-monthly-trend"></canvas></div>
-    </div>
-  </div>
-  <div class="grid2">
-    <div class="panel">
-      <div class="panel-title">SLA Atual por Status <span>tickets abertos agora</span></div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-sla-status">
-          <thead><tr>
-            <th>Status</th><th class="num">Total</th><th class="num">✅ OK</th>
-            <th class="num">⚠️ Atenção</th><th class="num">🔴 Vencido</th><th class="num">Média Atual</th>
-          </tr></thead>
-          <tbody id="tbody-sla-status"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="panel blue">
-      <div class="panel-title">Atendimentos por Técnico <span>tickets abertos agora</span></div>
-      <div class="chart-wrap"><canvas id="chart-tech"></canvas></div>
-    </div>
-  </div>
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">Performance por Técnico <span>histórico do período</span></div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-tech-hist">
-          <thead><tr>
-            <th>Técnico</th><th class="num">Tickets</th><th class="num">Fechados</th>
-            <th class="num">Lead Time Médio</th><th>% Resolução</th>
-          </tr></thead>
-          <tbody id="tbody-tech-hist"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">SLA Atual por Técnico <span>tickets abertos agora</span></div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-tech">
-          <thead><tr>
-            <th>Técnico</th><th class="num">Total</th><th class="num">OK</th>
-            <th class="num">Atenção</th><th class="num">Vencido</th><th>Performance</th>
-          </tr></thead>
-          <tbody id="tbody-tech"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════ IMPORTAÇÕES -->
-<div id="tab-importacoes" class="tab-content">
-  <div class="section-header">Planejamento de Importações</div>
-
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">Top Componentes Consumidos</div>
-      <div style="overflow-x:auto; max-height:320px; overflow-y:auto;">
-        <table class="tbl" id="tbl-components">
-          <thead><tr>
-            <th>SKU</th><th>Modelo</th><th class="num">Total</th>
-            <th class="num">Em Garantia</th><th class="num">Fora Garantia</th>
-          </tr></thead>
-          <tbody id="tbody-components"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="panel blue">
-      <div class="panel-title">Consumo Mensal de Peças</div>
-      <div class="chart-wrap tall"><canvas id="chart-monthly"></canvas></div>
-    </div>
-  </div>
-
-  <div class="panel red">
-    <div class="panel-title">Estoque de Spare Parts <span>— alerta de estoque mínimo</span></div>
-    <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
-      <input type="text" id="search-parts" placeholder="🔍 Buscar peça..." style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-size:13px;width:260px;" oninput="renderSpareParts()"/>
-      <button onclick="saveStockMins()" style="background:var(--yellow);color:var(--bg);border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:var(--fontc);font-size:13px;font-weight:700;">💾 Salvar Mínimos</button>
-    </div>
-    <div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
-      <table class="tbl" id="tbl-spare">
-        <thead><tr>
-          <th>Fornecedor</th><th>Categoria</th><th>SKU</th><th>Modelo</th>
-          <th class="num">Qtd Inicial</th><th class="num">Saída</th><th class="num">Total Físico</th>
-          <th class="num">Estoque Mín.</th><th>Status</th>
-        </tr></thead>
-        <tbody id="tbody-spare"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-title">Base de Importações (Sankhya)</div>
-    <div style="overflow-x:auto; max-height:350px; overflow-y:auto;">
-      <table class="tbl" id="tbl-sankhya">
-        <thead><tr id="thead-sankhya"></tr></thead>
-        <tbody id="tbody-sankhya"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════ SLA & LEAD TIME -->
-<div id="tab-sla" class="tab-content fullwidth">
-  <div class="section-header">SLA & Lead Time por Status</div>
-
-  <!-- Filtro de garantia + KPIs -->
-  <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <label style="font-size:12px;color:var(--gray2);">Tipo:</label>
-      <select id="filtro-garantia" onchange="renderSlaReport()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
-        <option value="todos">Todos</option>
-        <option value="garantia">Em Garantia</option>
-        <option value="fora">Fora de Garantia</option>
-        <option value="manutencao">Manutenção Paga</option>
-      </select>
-    </div>
-    <div class="kpi yellow" id="kpi-sla-geral" style="min-width:140px;flex:none;"><div class="val">—</div><div class="lbl">% Conclusão SLA Geral</div></div>
-    <div class="kpi blue" id="kpi-sla-tickets" style="min-width:120px;flex:none;"><div class="val">0</div><div class="lbl">Tickets com Histórico</div></div>
-    <div class="kpi" id="kpi-sla-loading" style="min-width:140px;flex:none;"><div class="val" style="font-size:16px;">0/0</div><div class="lbl">Histórico Carregado</div></div>
-    <p style="font-size:11px;color:var(--gray2);margin-left:auto;">As médias de lead time estão em dias úteis (1 dia = 8h). Cruzamento com RMA para filtro de garantia.</p>
-  </div>
-
-  <!-- Tabela de lead time por status -->
-  <div class="panel yellow" style="margin-bottom:16px;">
-    <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span></div>
-    <div style="overflow-x:auto;">
-      <table class="tbl" id="tbl-sla-hist">
-        <thead><tr>
-          <th>Subclassificações</th>
-          <th class="num">Média Resolução (dias úteis)</th>
-          <th class="num">% Conclusão SLA</th>
-          <th class="num">SLA Dias Úteis</th>
-          <th class="num">Qtde Casos</th>
-          <th class="num">% Frequência</th>
-        </tr></thead>
-        <tbody id="tbody-sla-hist">
-          <tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguardando carregamento do histórico de tickets...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Gráfico % SLA por mês -->
-  <div class="panel blue">
-    <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
-    <div class="chart-wrap" style="height:360px;"><canvas id="chart-sla-mensal"></canvas></div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════ DADOS -->
-<div id="tab-dados" class="tab-content">
-  <div class="section-header">Gerenciamento de Dados</div>
-
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">📋 RMA — Zoho Forms</div>
-      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">
-        Exporte o CSV em: <a href="https://forms.zoho.com/neosolar/report/RMAEPEVER1_Report/records/web" target="_blank" style="color:var(--yellow);">Zoho Forms → Report RMA</a>
-      </p>
-      <div class="upload-zone" id="zone-rma" onclick="document.getElementById('file-rma').click()">
-        <input type="file" id="file-rma" accept=".csv" onchange="handleFile('rma', this)"/>
-        <div class="icon">📄</div>
-        <p>Clique ou arraste o CSV do RMA</p>
-        <div class="filename" id="fname-rma"></div>
-      </div>
-      <button class="upload-btn" onclick="uploadFile('rma')">Enviar RMA</button>
-      <div id="status-rma" class="upload-status" style="display:none;"></div>
-    </div>
-
-    <div class="panel blue">
-      <div class="panel-title">🔩 Spare Parts — Google Sheets</div>
-      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">
-        Exporte sua planilha de spare parts como CSV e faça upload aqui.
-      </p>
-      <div class="upload-zone" id="zone-spare" onclick="document.getElementById('file-spare').click()">
-        <input type="file" id="file-spare" accept=".csv" onchange="handleFile('spare', this)"/>
-        <div class="icon">📊</div>
-        <p>Clique ou arraste o CSV de Spare Parts</p>
-        <div class="filename" id="fname-spare"></div>
-      </div>
-      <button class="upload-btn" onclick="uploadFile('spare')">Enviar Spare Parts</button>
-      <div id="status-spare" class="upload-status" style="display:none;"></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">📦 Importações — Sankhya</div>
-      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">
-        Exporte o relatório de importações do Sankhya como CSV e faça upload aqui.
-      </p>
-      <div class="upload-zone" id="zone-sankhya" onclick="document.getElementById('file-sankhya').click()">
-        <input type="file" id="file-sankhya" accept=".csv" onchange="handleFile('sankhya', this)"/>
-        <div class="icon">🚢</div>
-        <p>Clique ou arraste o CSV do Sankhya</p>
-        <div class="filename" id="fname-sankhya"></div>
-      </div>
-      <button class="upload-btn" onclick="uploadFile('sankhya')">Enviar Sankhya</button>
-      <div id="status-sankhya" class="upload-status" style="display:none;"></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">📡 Status das Fontes</div>
-      <div id="source-status" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
-      <p style="font-size:11px;color:var(--gray2);margin-top:16px;">
-        ⚠️ Os dados de upload são armazenados temporariamente no servidor. Recomendamos refazer o upload semanalmente ou após deploy.
-      </p>
-    </div>
-  </div>
-</div>
-
-</main>
-
-<script>
-// ─── State ───────────────────────────────────────────────────────────
-let state = { report: null, files: {} };
-let charts = {};
-
-// ─── Clock ───────────────────────────────────────────────────────────
-setInterval(() => {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('pt-BR');
-}, 1000);
-
-// ─── Period helpers ──────────────────────────────────────────────────
-function setPeriod(days) {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - days);
-  document.getElementById('date-from').value = from.toISOString().slice(0, 10);
-  document.getElementById('date-to').value = to.toISOString().slice(0, 10);
-  document.querySelectorAll('.period-shortcuts button').forEach(b => b.classList.remove('active'));
-  const id = { 7: 'sh-7', 30: 'sh-30', 90: 'sh-90', 365: 'sh-365' }[days];
-  if (id) document.getElementById(id).classList.add('active');
-}
-function setPeriodAll() {
-  document.getElementById('date-from').value = '2022-01-01';
-  document.getElementById('date-to').value = new Date().toISOString().slice(0, 10);
-  document.querySelectorAll('.period-shortcuts button').forEach(b => b.classList.remove('active'));
-  document.getElementById('sh-all').classList.add('active');
-}
-
-// ─── Tabs ─────────────────────────────────────────────────────────────
-function switchTab(id) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.getElementById(`tab-${id}`).classList.add('active');
-  event.target.classList.add('active');
-}
-
-// ─── Chart helpers ───────────────────────────────────────────────────
-const C = {
-  yellow: '#FFD04C', white: '#FFFDF0', gray: '#565759', gray2: '#888',
-  red: '#e05252', green: '#52c878', orange: '#e09052', blue: '#5299e0', purple: '#9b59e0',
-  bg2: '#242628', bg3: '#2c2e30', border: '#353739'
-};
-Chart.defaults.color = C.gray2;
-Chart.defaults.borderColor = C.border;
-Chart.defaults.font.family = 'Barlow, sans-serif';
-
-function makeChart(id, config) {
-  if (charts[id]) charts[id].destroy();
-  const ctx = document.getElementById(id);
-  if (!ctx) return;
-  charts[id] = new Chart(ctx, config);
-  return charts[id];
-}
-
-function palette(n) {
-  const cols = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red, '#52d4e0', '#e052a0', '#a0e052', '#52a0e0'];
-  return Array.from({ length: n }, (_, i) => cols[i % cols.length]);
-}
-
-// ─── Desk tickets (paginado no frontend) ─────────────────────────────
-let deskTickets = [];
-let deskLoaded = false;
-
-// ─── Histórico de status por ticket ──────────────────────────────────
-// { ticketId: { statusTimes: { statusName: hours }, totalHours } }
-let deskHistory = {};
-let historyLoading = false;
-let historyLoaded = false;
-
-// Mapeamento de status para grupos (igual ao report de referência)
-const STATUS_GRUPOS = {
-  // ENTRADA
-  'Aguardando 1º contato - AST': 'ENTRADA',
-  'Pendencia AST - SAC': 'ENTRADA',
-  'Aguardando Classificação': 'ENTRADA',
-  // AVALIAÇÃO
-  'Aguardando teste': 'AVALIAÇÃO',
-  'Em teste': 'AVALIAÇÃO',
-  'Ag. teste': 'AVALIAÇÃO',
-  // TÉCNICO
-  'Aguardando aprovaçao de manutençao (SG)': 'TÉCNICO',
-  'Ag. aprovação manutenção (SG)': 'TÉCNICO',
-  'Aguardando manutençao (SG)': 'TÉCNICO',
-  'Em manutençao': 'TÉCNICO',
-  'Em manutenção': 'TÉCNICO',
-  'Aguardando laudo': 'TÉCNICO',
-  'Aguardando RMA': 'TÉCNICO',
-  'Ag. Peça Reposição': 'TÉCNICO',
-  'Aguardando Peça Reposição': 'TÉCNICO',
-  // DEVOLUÇÃO (sem Descarte e Produto despachado AST)
-  'Em tratativa p/ devoluçao cliente': 'DEVOLUÇÃO',
-  'Em tratativa p/ devolução cliente': 'DEVOLUÇÃO',
-  'Aguardando coleta': 'DEVOLUÇÃO',
-  'Ag. Prazo / Autorização Descarte': 'DEVOLUÇÃO',
-  'Aguardando Prazo / Autorização Descarte': 'DEVOLUÇÃO'
-  // IGNORADOS: Aguardando Chegada de Produto na Neosolar, Descarte, Produto despachado AST
-};
-
-// SLA em dias úteis por status
-const SLA_DIAS_UTEIS = {
-  'Aguardando 1º contato - AST': 0.5,
-  'Aguardando teste': 3.0,
-  'Em teste': 0.25,
-  'Em manutençao': 0.25,
-  'Em manutenção': 0.25,
-  'Aguardando aprovaçao de manutençao (SG)': 2.0,
-  'Aguardando manutençao (SG)': 1.0,
-  'Aguardando laudo': 0.13,
-  'Aguardando RMA': 0.5,
-  'Ag. Peça Reposição': 0.5,
-  'Aguardando Peça Reposição': 0.5,
-  'Em tratativa p/ devoluçao cliente': 2.0,
-  'Aguardando coleta': 1.0
-};
-
-// Converte horas para dias úteis (~8h/dia)
-function horasParaDiasUteis(horas) {
-  return horas / 8;
-}
-
-// Status ignorados no histórico e no cálculo de SLA
-const STATUS_IGNORADOS = new Set([
-  'Aguardando Chegada de Produto na Neosolar',
-  'Descarte',
-  'Produto despachado AST',
-  'Aguardando Prazo / Autorização Descarte',
-  'Ag. Prazo / Autorização Descarte'
-]);
-
-// Status que indicam ticket "concluído" para o report
-const STATUS_CONCLUIDOS = new Set([
-  'Descarte',
-  'Produto despachado AST',
-  'Produto despachado',
-]);
-
-// Busca histórico de tickets concluídos em background
-async function fetchDeskHistory(tickets) {
-  if (historyLoading) return;
-  historyLoading = true;
-  historyLoaded = false;
-
-  // Mapa ticketNumber → ticket object (tickets carregados do Desk)
-  const ticketMap = {};
-  for (const t of tickets) ticketMap[String(t.ticketNumber)] = t;
-
-  // RMA filtrado a partir de 01/01/2025
-  const rmaRaw = window._rmaRaw || [];
-  const dataCorte = new Date('2025-01-01');
-
-  function parseDataBR(str) {
-    if (!str) return null;
-    // Tenta DD/MM/YYYY
-    const p = str.trim().split('/');
-    if (p.length === 3) {
-      const d = new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
-      if (!isNaN(d)) return d;
+async function dbGet(key) {
+  try {
+    const res = await axios.get(
+      `${SUPA_URL}/rest/v1/ast_storage?key=eq.${encodeURIComponent(key)}&select=value,updated_at`,
+      { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
+    );
+    if (res.data && res.data.length > 0) {
+      return { value: JSON.parse(res.data[0].value), updated_at: res.data[0].updated_at };
     }
-    // Tenta ISO
-    const d2 = new Date(str);
-    if (!isNaN(d2)) return d2;
-    return null;
-  }
-
-  const rmaFiltrado = rmaRaw.filter(r => {
-    const d = parseDataBR(r.testDate) || parseDataBR(r.addedTime);
-    return d && d >= dataCorte;
-  });
-
-  const rmaNumeros = [...new Set(rmaFiltrado.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0' && n.length > 3))];
-
-  // Separa: tickets disponíveis no Desk vs tickets antigos só no RMA
-  const comId = [];       // têm ticketId disponível
-  const semId = [];       // só têm ticketNumber, precisam buscar via Search API
-
-  for (const num of rmaNumeros) {
-    const cacheKey = 'rma_' + num;
-    if (deskHistory[cacheKey] || deskHistory[ticketMap[num]?.id]) continue;
-    if (ticketMap[num]) comId.push(ticketMap[num]);
-    else semId.push(num);
-  }
-
-  // Também adiciona tickets Desk em status de conclusão não presentes no RMA
-  for (const t of tickets) {
-    const num = String(t.ticketNumber);
-    if (!rmaNumeros.includes(num) && (t.closedTime || STATUS_CONCLUIDOS.has(t.status)) && !deskHistory[t.id]) {
-      comId.push(t);
-    }
-  }
-
-  const totalParaBuscar = comId.length + semId.length;
-  let processed = 0;
-  document.getElementById('last-update').textContent = `⏳ Histórico: 0/${totalParaBuscar} tickets...`;
-
-  // 1. Busca por ticketId (rápido — já temos o ID)
-  for (const t of comId) {
-    if (deskHistory[t.id]) { processed++; continue; }
-    try {
-      const res = await fetch(`/api/desk-history?ticketId=${t.id}`);
-      const data = await res.json();
-      if (!data.error && data.statusTimes && Object.keys(data.statusTimes).length > 0) {
-        deskHistory[t.id] = {
-          statusTimes: data.statusTimes,
-          totalHours: t.totalHours || 0,
-          ticketNumber: t.ticketNumber,
-          assigneeName: t.assigneeName,
-          createdTime: t.createdTime,
-          closedTime: t.closedTime || t.modifiedTime
-        };
-      }
-    } catch {}
-    processed++;
-    if (processed % 5 === 0) {
-      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${totalParaBuscar} tickets...`;
-      renderSlaReport();
-    }
-  }
-
-  // 2. Busca por ticketNumber (tickets antigos via Search API)
-  for (const num of semId) {
-    const cacheKey = 'rma_' + num;
-    if (deskHistory[cacheKey]) { processed++; continue; }
-    try {
-      const res = await fetch(`/api/desk-history?ticketNumber=${num}`);
-      const data = await res.json();
-      if (!data.error && data.statusTimes && Object.keys(data.statusTimes).length > 0) {
-        deskHistory[cacheKey] = {
-          statusTimes: data.statusTimes,
-          totalHours: 0,
-          ticketNumber: num,
-          assigneeName: 'Sem agente',
-          createdTime: data.createdTime || '',
-          closedTime: data.closedTime || ''
-        };
-      }
-    } catch {}
-    processed++;
-    if (processed % 5 === 0) {
-      document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${totalParaBuscar} tickets...`;
-      renderSlaReport();
-    }
-  }
-
-  historyLoading = false;
-  historyLoaded = true;
-  document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-  renderSlaReport();
+    return { value: null, updated_at: null };
+  } catch { return { value: null, updated_at: null }; }
 }
 
-// Renderiza tabela e gráfico de SLA com base no histórico
-function renderSlaReport() {
-  const rmaData = state.report?.rma;
-  const filtroGarantia = document.getElementById('filtro-garantia')?.value || 'todos';
-
-  // Mapa ticket# → tipo de garantia via RMA
-  const rmaMap = {};
-  if (rmaData) {
-    // Precisamos dos dados raw do RMA — buscamos do cache do report
-    (window._rmaRaw || []).forEach(r => {
-      const v = r.validation?.toLowerCase() || '';
-      let tipo = 'warranty';
-      if (v.includes('no warranty maintenance')) tipo = 'maintenance';
-      else if (v.includes('no warranty')) tipo = 'no_warranty';
-      if (r.deskNum) rmaMap[String(r.deskNum).trim()] = tipo;
-    });
-  }
-
-  // Filtra tickets do histórico pelo período e tipo de garantia
-  const from = new Date(document.getElementById('date-from').value);
-  const to = new Date(document.getElementById('date-to').value);
-  to.setHours(23, 59, 59);
-
-  const histEntries = Object.values(deskHistory).filter(h => {
-    // Só inclui tickets que têm statusTimes relevantes (passaram por status de análise)
-    if (!h.statusTimes || Object.keys(h.statusTimes).length === 0) return false;
-    const d = new Date(h.createdTime);
-    if (d < from || d > to) return false;
-    if (filtroGarantia === 'todos') return true;
-    const tipo = rmaMap[String(h.ticketNumber)] || 'warranty';
-    if (filtroGarantia === 'garantia') return tipo === 'warranty';
-    if (filtroGarantia === 'fora') return tipo === 'no_warranty';
-    if (filtroGarantia === 'manutencao') return tipo === 'maintenance';
-    return true;
-  });
-
-  const total = histEntries.length;
-
-  // Agrupa por status — conta tickets únicos por status
-  const statusMetrics = {}; // { status: { totalDias, ticketsUnicos: Set, dentroSla } }
-  for (const h of histEntries) {
-    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
-      if (!statusMetrics[status]) statusMetrics[status] = { totalDias: 0, ticketsUnicos: new Set(), dentroSla: 0 };
-      const dias = horasParaDiasUteis(hours);
-      const slaDias = SLA_DIAS_UTEIS[status];
-      statusMetrics[status].totalDias += dias;
-      statusMetrics[status].ticketsUnicos.add(h.ticketNumber);
-      if (!slaDias || dias <= slaDias) statusMetrics[status].dentroSla++;
-    }
-  }
-
-  // Monta tabela agrupada
-  const grupos = ['ENTRADA', 'AVALIAÇÃO', 'TÉCNICO', 'DEVOLUÇÃO'];
-  const tblEl = document.getElementById('tbody-sla-hist');
-  if (!tblEl) return;
-
-  let rows = '';
-  for (const grupo of grupos) {
-    const statusDoGrupo = Object.entries(statusMetrics).filter(([s]) => STATUS_GRUPOS[s] === grupo);
-    if (statusDoGrupo.length === 0) continue;
-
-    // Tickets únicos que passaram por qualquer status do grupo
-    const ticketsDoGrupo = new Set();
-    for (const [, v] of statusDoGrupo) v.ticketsUnicos.forEach(t => ticketsDoGrupo.add(t));
-    const grpUnico = ticketsDoGrupo.size;
-
-    // Soma do SLA de todos os status do grupo
-    const grpSlaSoma = statusDoGrupo.reduce((a, [s]) => a + (SLA_DIAS_UTEIS[s] || 0), 0);
-
-    // Métricas agregadas
-    const grpTotalOcorr = statusDoGrupo.reduce((a, [, v]) => a + v.ticketsUnicos.size, 0);
-    const grpDias = statusDoGrupo.reduce((a, [, v]) => a + v.totalDias, 0);
-    const grpDentro = statusDoGrupo.reduce((a, [, v]) => a + v.dentroSla, 0);
-    const grpMediaDias = grpTotalOcorr > 0 ? grpDias / grpTotalOcorr : 0;
-    const grpSla = grpTotalOcorr > 0 ? Math.round(grpDentro / grpTotalOcorr * 100) : 0;
-    const grpFreq = total > 0 ? Math.round(grpUnico / total * 100) : 0;
-    const grpColor = grpSla >= 80 ? C.green : grpSla >= 50 ? C.orange : C.red;
-
-    rows += `<tr style="background:rgba(255,255,255,0.05);">
-      <td style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--yellow);">${grupo}</td>
-      <td class="num" style="font-weight:600;">${grpMediaDias.toFixed(2)}</td>
-      <td class="num"><span style="color:${grpColor};font-weight:600;">${grpSla}%</span></td>
-      <td class="num" style="font-weight:600;">${grpSlaSoma > 0 ? grpSlaSoma.toFixed(2) : '—'}</td>
-      <td class="num">${grpUnico}</td>
-      <td class="num">${grpFreq}%</td>
-    </tr>`;
-
-    // Linhas de sub-status
-    for (const [status, v] of statusDoGrupo.sort((a, b) => b[1].ticketsUnicos.size - a[1].ticketsUnicos.size)) {
-      const unicos = v.ticketsUnicos.size;
-      const mediaDias = unicos > 0 ? v.totalDias / unicos : 0;
-      const pctSla = unicos > 0 ? Math.round(v.dentroSla / unicos * 100) : 0;
-      const freq = total > 0 ? Math.round(unicos / total * 100) : 0;
-      const slaDias = SLA_DIAS_UTEIS[status] || null;
-      const color = pctSla >= 80 ? C.green : pctSla >= 50 ? C.orange : C.red;
-      rows += `<tr>
-        <td style="padding-left:20px;color:var(--gray2);">${status}</td>
-        <td class="num">${mediaDias.toFixed(2)}</td>
-        <td class="num"><span style="color:${color};">● ${pctSla}%</span></td>
-        <td class="num">${slaDias !== null ? slaDias : '—'}</td>
-        <td class="num">${unicos}</td>
-        <td class="num">${freq}%</td>
-      </tr>`;
-    }
-  }
-
-  tblEl.innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:var(--gray2);">
-    ${Object.keys(deskHistory).length === 0 ? '⏳ Carregando histórico de tickets...' : 'Sem dados para o período/filtro selecionado'}
-  </td></tr>`;
-
-  // Gráfico % SLA por mês
-  const slaByMonth = {}; // { 'YYYY-MM': { ENTRADA: {dentro,total}, AVALIAÇÃO: ... } }
-  for (const h of histEntries) {
-    const month = h.createdTime?.substring(0, 7) || 'N/A';
-    if (!slaByMonth[month]) slaByMonth[month] = { ENTRADA: {d:0,t:0}, AVALIAÇÃO: {d:0,t:0}, TÉCNICO: {d:0,t:0}, DEVOLUÇÃO: {d:0,t:0} };
-    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
-      const grupo = STATUS_GRUPOS[status];
-      if (!grupo || !slaByMonth[month][grupo]) continue;
-      const dias = horasParaDiasUteis(hours);
-      const slaDias = SLA_DIAS_UTEIS[status];
-      slaByMonth[month][grupo].t++;
-      if (!slaDias || dias <= slaDias) slaByMonth[month][grupo].d++;
-    }
-  }
-
-  const months = Object.keys(slaByMonth).sort();
-  const grupoColors = { ENTRADA: C.green, AVALIAÇÃO: C.blue, TÉCNICO: C.orange, DEVOLUÇÃO: C.purple };
-
-  makeChart('chart-sla-mensal', {
-    type: 'bar',
-    data: {
-      labels: months.map(m => {
-        const [y, mo] = m.split('-');
-        return new Date(y, mo-1).toLocaleString('pt-BR', { month: 'short', year: '2-digit' });
-      }),
-      datasets: [
-        ...grupos.map(g => ({
-          label: g,
-          data: months.map(m => {
-            const v = slaByMonth[m]?.[g];
-            return v && v.t > 0 ? Math.round(v.d/v.t*100) : null;
-          }),
-          backgroundColor: grupoColors[g],
-          borderRadius: 3
-        })),
-        {
-          label: 'Meta (80%)',
-          data: months.map(() => 80),
-          type: 'line',
-          borderColor: C.yellow,
-          borderDash: [5, 5],
-          pointRadius: 0,
-          borderWidth: 2,
-          fill: false
+async function dbSet(key, value) {
+  try {
+    await axios.post(`${SUPA_URL}/rest/v1/ast_storage`,
+      { key, value: JSON.stringify(value), updated_at: new Date().toISOString() },
+      {
+        headers: {
+          apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`,
+          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
         }
-      ]
-    },
-    options: {
-      plugins: { legend: { position: 'bottom' } },
-      scales: {
-        y: { beginAtZero: true, max: 105, ticks: { callback: v => v + '%' } }
+      }
+    );
+    return true;
+  } catch (e) { console.error('dbSet error:', e.message); return false; }
+}
+
+// ─── Memory cache ────────────────────────────────────────────────────
+let memCache = {
+  rma: { data: null, ts: 0, updated_at: null },
+  sankhya: { data: null, ts: 0, updated_at: null },
+  sheets: { data: null, ts: 0, updated_at: null },
+  stockMin: { data: {}, ts: 0 }
+};
+const MEM_TTL = 10 * 60 * 1000;
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+// ─── Zoho Auth ───────────────────────────────────────────────────────
+let zohoToken = { access_token: null, expires_at: 0 };
+
+async function getDeskToken() {
+  if (zohoToken.access_token && Date.now() < zohoToken.expires_at) return zohoToken.access_token;
+  const res = await axios.post('https://accounts.zoho.com/oauth/v2/token', null, {
+    params: {
+      refresh_token: process.env.ZOHO_REFRESH_TOKEN,
+      client_id: process.env.ZOHO_CLIENT_ID,
+      client_secret: process.env.ZOHO_CLIENT_SECRET,
+      grant_type: 'refresh_token'
+    }
+  });
+  zohoToken.access_token = res.data.access_token;
+  zohoToken.expires_at = Date.now() + (res.data.expires_in - 60) * 1000;
+  return zohoToken.access_token;
+}
+
+// ─── SLA map ─────────────────────────────────────────────────────────
+const SLA = {
+  'Aguardando Teste': 72, 'Ag. teste': 72,
+  'Em Teste': 6, 'Em teste': 6,
+  'Em Manutenção': 24, 'Em manutenção': 24,
+  'Aguardando Peça Reposição': 1080, 'Ag. Peça Reposição': 1080,
+  'Ag. Aprovação Manutenção SG': 48, 'Ag. aprovação manutenção (SG)': 48,
+  'Em Tratativa Devolução Cliente': 48, 'Em tratativa p/ devolução cliente': 48,
+  'Aguardando Manutenção SG': 24, 'Aguardando Laudo': 3
+};
+
+function getSlaStatus(status, hours) {
+  const sla = SLA[status];
+  if (!sla) return 'ok';
+  const pct = hours / sla;
+  if (pct >= 1) return 'vencido';
+  if (pct >= 0.75) return 'atencao';
+  return 'ok';
+}
+
+// ─── Desk tickets endpoint (paginado — 1 página por chamada) ─────────
+app.get('/api/desk-page', async (req, res) => {
+  try {
+    const from = parseInt(req.query.from) || 0;
+    const statusFilter = req.query.status || ''; // 'closed' ou vazio para abertos
+    const limit = 50;
+
+    const token = await getDeskToken();
+    const deptId = process.env.ZOHO_DEPT_ID;
+
+    await delay(150);
+    const response = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts&sortBy=-createdTime`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const allData = response.data.data || [];
+
+    const tickets = allData.map(t => ({
+      id: t.id,
+      ticketNumber: t.ticketNumber,
+      subject: t.subject,
+      status: t.status,
+      assigneeName: t.assignee?.name || 'Sem agente',
+      createdTime: t.createdTime,
+      closedTime: t.closedTime || null,
+      modifiedTime: t.modifiedTime,
+      hoursInCurrentStatus: (Date.now() - new Date(t.modifiedTime || t.createdTime).getTime()) / 3600000,
+      totalHours: t.closedTime
+        ? (new Date(t.closedTime) - new Date(t.createdTime)) / 3600000
+        : (Date.now() - new Date(t.createdTime).getTime()) / 3600000
+    }));
+
+    res.json({
+      tickets,
+      hasMore: allData.length === limit,
+      nextFrom: from + limit,
+      debug: allData.length === 0 ? response.data : undefined
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message, detail: e.response?.data, status_code: e.response?.status });
+  }
+});
+
+// ─── Desk history endpoint (1 ticket por vez) ────────────────────────
+app.get('/api/desk-history', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+
+    const token = await getDeskToken();
+    await delay(150);
+
+    const hist = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const events = hist.data.data || [];
+    const statusChanges = [];
+
+    for (const e of events) {
+      if (!e.eventInfo) continue;
+      for (const info of e.eventInfo) {
+        if (info.propertyName !== 'Status') continue;
+        const val = info.propertyValue;
+        const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
+        if (toStatus) {
+          statusChanges.push({ status: toStatus, time: e.eventTime });
+        }
       }
     }
-  });
 
-  // KPI histórico — usa tickets únicos por status
-  const allDentro = Object.values(statusMetrics).reduce((a, v) => a + v.dentroSla, 0);
-  const allTotal = Object.values(statusMetrics).reduce((a, v) => a + v.ticketsUnicos.size, 0);
-  const pctGeral = allTotal > 0 ? Math.round(allDentro/allTotal*100) : 0;
-  const elSlaGeral = document.getElementById('kpi-sla-geral');
-  if (elSlaGeral) {
-    const color = pctGeral >= 80 ? C.green : pctGeral >= 50 ? C.orange : C.red;
-    elSlaGeral.innerHTML = `<div class="val" style="color:${color}">${pctGeral}%</div><div class="lbl">% Conclusão SLA Geral</div>`;
-  }
-  const elSlaTickets = document.getElementById('kpi-sla-tickets');
-  if (elSlaTickets) elSlaTickets.innerHTML = `<div class="val">${total}</div><div class="lbl">Tickets com Histórico</div>`;
-  const elSlaLoading = document.getElementById('kpi-sla-loading');
-  if (elSlaLoading) {
-    const totalFechados = deskTickets.filter(t => t.closedTime).length;
-    elSlaLoading.innerHTML = `<div class="val" style="font-size:16px;">${Object.keys(deskHistory).length}/${totalFechados}</div><div class="lbl">Histórico Carregado</div>`;
-  }
-}
+    // Sort by time
+    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
 
-async function fetchDeskPages() {
-  deskTickets = [];
-  deskLoaded = false;
-  document.getElementById('last-update').textContent = '⏳ Carregando Desk...';
-
-  let from = 0;
-  let hasMore = true;
-  while (hasMore) {
-    try {
-      const res = await fetch(`/api/desk-page?from=${from}`);
-      const data = await res.json();
-      if (data.error) break;
-      deskTickets = deskTickets.concat(data.tickets);
-      hasMore = data.hasMore;
-      from = data.nextFrom;
-      document.getElementById('last-update').textContent =
-        `⏳ Desk: ${deskTickets.length} tickets carregados...`;
-      if (data.tickets.length > 0) loadReport();
-    } catch { break; }
-  }
-
-  deskLoaded = true;
-  await loadReport(); // espera RMA carregar antes de iniciar histórico
-  document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-  // Inicia busca de histórico — agora _rmaRaw já está disponível
-  fetchDeskHistory(deskTickets);
-}
-
-// ─── Load report (processa dados com tickets já carregados) ───────────
-async function loadReport() {
-  const from = document.getElementById('date-from').value;
-  const to = document.getElementById('date-to').value;
-  try {
-    const res = await fetch('/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, tickets: deskTickets })
-    });
-    const data = await res.json();
-    state.report = data;
-    if (deskLoaded) {
-      document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+    // Calculate time spent in each status (in business hours approximation)
+    const statusTimes = {};
+    for (let i = 0; i < statusChanges.length; i++) {
+      const sName = statusChanges[i].status;
+      const start = new Date(statusChanges[i].time);
+      const end = i < statusChanges.length - 1
+        ? new Date(statusChanges[i + 1].time)
+        : new Date();
+      const hours = (end - start) / 3600000;
+      if (hours > 0 && hours < 8760) {
+        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
+      }
     }
-    // Salva RMA raw para cruzamento com histórico de garantia
-    if (data.rma?.raw) window._rmaRaw = data.rma.raw;
-    renderAll(data);
-    renderSlaReport(); // atualiza SLA com dados disponíveis
-  } catch (e) { console.error('Erro ao carregar report:', e); }
-}
 
-async function loadData() {
-  await loadReport();       // Carrega RMA/Spare Parts imediatamente
-  fetchDeskPages();          // Busca Desk em paralelo paginado
-}
-
-// Salva raw RMA para cruzamento com histórico
-function saveRmaRaw(reportData) {
-  // Reconstruímos o raw a partir dos dados processados disponíveis
-  window._rmaRaw = window._rmaRaw || [];
-}
-
-function renderAll(d) {
-  renderDataStatus(d.dataStatus);
-  renderVisaoGeral(d);
-  renderProdutos(d);
-  renderOperacao(d);
-  renderImportacoes(d);
-  renderSourceStatus(d.dataStatus);
-}
-
-// ─── DATA STATUS BADGES ──────────────────────────────────────────────
-function renderDataStatus(ds) {
-  const el = document.getElementById('data-status');
-  const items = [
-    { key: 'desk', label: 'Desk' }, { key: 'rma', label: 'RMA' },
-    { key: 'sankhya', label: 'Sankhya' }, { key: 'spareParts', label: 'Spare Parts' }
-  ];
-  el.innerHTML = items.map(i =>
-    `<div class="ds-badge ${ds[i.key] ? 'ok' : 'missing'}">${ds[i.key] ? '●' : '○'} ${i.label}</div>`
-  ).join('');
-}
-
-// ─── VISÃO GERAL ─────────────────────────────────────────────────────
-function renderVisaoGeral(d) {
-  const r = d.rma; const desk = d.desk;
-  const kpis = [
-    { val: r.total, lbl: 'RMA no Período', cls: 'yellow' },
-    { val: desk.total, lbl: 'Tickets Desk Abertos', cls: 'blue' },
-    { val: r.warrantyCount.warranty, lbl: 'Em Garantia', cls: 'green' },
-    { val: r.warrantyCount.noWarranty + r.warrantyCount.noWarrantyMaint, lbl: 'Fora de Garantia', cls: 'red' },
-    { val: Object.keys(r.lineCount).length, lbl: 'Linhas de Produto', cls: 'purple' },
-    { val: d.spareParts.filter(p => p.alert).length, lbl: 'Alertas de Estoque', cls: 'orange' }
-  ];
-  document.getElementById('kpi-geral').innerHTML = kpis.map(k =>
-    `<div class="kpi ${k.cls}"><div class="val">${k.val}</div><div class="lbl">${k.lbl}</div></div>`
-  ).join('');
-
-  // Chart: line count
-  const lines = Object.entries(r.lineCount).sort((a, b) => b[1] - a[1]);
-  makeChart('chart-line', {
-    type: 'doughnut',
-    data: { labels: lines.map(l => l[0]), datasets: [{ data: lines.map(l => l[1]), backgroundColor: palette(lines.length), borderWidth: 2, borderColor: C.bg2 }] },
-    options: { plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 12 } } } }, cutout: '60%' }
-  });
-
-  // Chart: desk status
-  const statusEntries = Object.entries(desk.slaByStatus).sort((a, b) => b[1].total - a[1].total);
-  makeChart('chart-desk-status', {
-    type: 'bar',
-    data: {
-      labels: statusEntries.map(([s]) => s.replace('Aguardando', 'Ag.').replace('Manutenção', 'Manut.')),
-      datasets: [
-        { label: 'OK', data: statusEntries.map(([, v]) => v.ok), backgroundColor: C.green, borderRadius: 3 },
-        { label: 'Atenção', data: statusEntries.map(([, v]) => v.atencao), backgroundColor: C.orange, borderRadius: 3 },
-        { label: 'Vencido', data: statusEntries.map(([, v]) => v.vencido), backgroundColor: C.red, borderRadius: 3 }
-      ]
-    },
-    options: { indexAxis: 'y', scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
-  });
-
-  // Chart: warranty
-  const w = r.warrantyCount;
-  makeChart('chart-warranty', {
-    type: 'pie',
-    data: {
-      labels: ['Em Garantia', 'Fora de Garantia', 'Manutenção s/ Garantia'],
-      datasets: [{ data: [w.warranty, w.noWarranty, w.noWarrantyMaint], backgroundColor: [C.green, C.red, C.purple], borderWidth: 2, borderColor: C.bg2 }]
-    },
-    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } } }
-  });
-
-  // Chart: service
-  const svc = Object.entries(r.serviceCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  makeChart('chart-service', {
-    type: 'doughnut',
-    data: {
-      labels: svc.map(([s]) => s),
-      datasets: [{ data: svc.map(([, v]) => v), backgroundColor: palette(svc.length), borderWidth: 2, borderColor: C.bg2 }]
-    },
-    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }, cutout: '55%' }
-  });
-
-  // SLA summary
-  const total = Object.values(desk.slaByStatus).reduce((a, v) => ({ ok: a.ok+v.ok, atencao: a.atencao+v.atencao, vencido: a.vencido+v.vencido, total: a.total+v.total }), { ok:0, atencao:0, vencido:0, total:0 });
-  const pct = (n) => total.total > 0 ? Math.round(n/total.total*100) : 0;
-  document.getElementById('sla-summary').innerHTML = `
-    <div style="margin-bottom:12px;">
-      ${[['OK', total.ok, C.green], ['Atenção', total.atencao, C.orange], ['Vencido', total.vencido, C.red]].map(([lbl, val, col]) => `
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="color:${col};font-size:13px;">● ${lbl}</span>
-          <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;">${val} <span style="font-size:12px;color:var(--gray2);">(${pct(val)}%)</span></span>
-        </div>
-        <div class="prog-bar"><div class="fill ${lbl.toLowerCase().replace('ã','a')}" style="width:${pct(val)}%"></div></div>
-      `).join('')}
-    </div>
-    <div style="font-size:12px;color:var(--gray2);margin-top:8px;">Total: ${total.total} tickets</div>
-  `;
-}
-
-// ─── PRODUTOS ────────────────────────────────────────────────────────
-function renderProdutos(d) {
-  const r = d.rma;
-
-  // Top products hbar
-  const maxP = r.topProducts[0]?.count || 1;
-  document.getElementById('top-products-list').innerHTML = r.topProducts.map(p => `
-    <div class="hbar-item">
-      <div class="label"><span>${p.model.split(' - ')[0]}</span><strong>${p.count}</strong></div>
-      <div class="hbar-track"><div class="hbar-fill" style="width:${p.count/maxP*100}%"></div></div>
-    </div>
-  `).join('') || '<div class="empty"><div class="icon">📭</div><p>Sem dados RMA no período</p></div>';
-
-  // Top faults hbar
-  const maxF = r.topFaults[0]?.count || 1;
-  document.getElementById('top-faults-list').innerHTML = r.topFaults.map(f => `
-    <div class="hbar-item">
-      <div class="label"><span>${f.fault}</span><strong>${f.count}</strong></div>
-      <div class="hbar-track"><div class="hbar-fill" style="width:${f.count/maxF*100}%;background:var(--red);"></div></div>
-    </div>
-  `).join('') || '<div class="empty"><div class="icon">📭</div><p>Sem dados RMA no período</p></div>';
-
-  // Chart: line by fornecedor
-  const lines = Object.entries(r.lineCount).sort((a, b) => b[1] - a[1]);
-  makeChart('chart-line2', {
-    type: 'bar',
-    data: {
-      labels: lines.map(l => l[0]),
-      datasets: [{ label: 'Atendimentos', data: lines.map(l => l[1]), backgroundColor: palette(lines.length), borderRadius: 4 }]
-    },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
-  });
-
-  // Curva ABC
-  const sorted = [...r.topProducts].sort((a, b) => b.count - a.count);
-  const total = sorted.reduce((s, p) => s + p.count, 0);
-  let cum = 0;
-  const cumPct = sorted.map(p => { cum += p.count; return Math.round(cum/total*100); });
-  makeChart('chart-abc', {
-    type: 'bar',
-    data: {
-      labels: sorted.map(p => p.model.split(' - ')[0]),
-      datasets: [
-        { label: 'Qtd', data: sorted.map(p => p.count), backgroundColor: C.yellow, borderRadius: 4, yAxisID: 'y' },
-        { label: '% Acumulado', data: cumPct, type: 'line', borderColor: C.red, backgroundColor: 'transparent', pointRadius: 4, tension: 0.3, yAxisID: 'y1' }
-      ]
-    },
-    options: {
-      scales: {
-        y: { beginAtZero: true, position: 'left' },
-        y1: { beginAtZero: true, max: 100, position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: v => v + '%' } }
-      },
-      plugins: { legend: { position: 'bottom' } }
-    }
-  });
-
-  // RMA table
-  // get raw rma from last fetch - show all filtered
-  document.getElementById('tbody-rma').innerHTML = (d.rma._raw || []).slice(0, 200).map(r => {
-    const vLow = r.validation.toLowerCase();
-    let cls = 'warranty', lbl = 'Garantia';
-    if (vLow.includes('no warranty maintenance')) { cls = 'no-warranty-maint'; lbl = 'S/ Gar. Manut.'; }
-    else if (vLow.includes('no warranty')) { cls = 'no-warranty'; lbl = 'Sem Garantia'; }
-    return `<tr>
-      <td>${r.fornecedor}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.model}">${r.model.split(' - ')[0]}</td>
-      <td>${r.sku}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.fault}">${r.fault}</td>
-      <td>${r.testDate}</td>
-      <td><span class="badge ${cls}">${lbl}</span></td>
-      <td>${r.service}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="7" class="empty"><div class="icon">📭</div><p>Sem dados</p></td></tr>';
-}
-
-// ─── OPERAÇÃO ────────────────────────────────────────────────────────
-function renderOperacao(d) {
-  const desk = d.desk;
-  const statusEntries = Object.entries(desk.slaByStatus);
-  const totalDesk = desk.total;
-  const vencidos = statusEntries.reduce((s, [, v]) => s + v.vencido, 0);
-  const emAtencao = statusEntries.reduce((s, [, v]) => s + v.atencao, 0);
-  const historico = desk.totalHistorico || 0;
-  const fechados = desk.totalClosed || 0;
-
-  document.getElementById('kpi-operacao').innerHTML = [
-    { val: totalDesk, lbl: 'Tickets Abertos Agora', cls: 'blue' },
-    { val: historico, lbl: 'Tickets no Período', cls: 'yellow' },
-    { val: fechados, lbl: 'Fechados no Período', cls: 'green' },
-    { val: vencidos, lbl: 'SLA Vencido', cls: 'red' },
-    { val: emAtencao, lbl: 'Em Atenção', cls: 'orange' },
-    { val: totalDesk - vencidos - emAtencao, lbl: 'Dentro do SLA', cls: 'green' }
-  ].map(k => `<div class="kpi ${k.cls}"><div class="val">${k.val}</div><div class="lbl">${k.lbl}</div></div>`).join('');
-
-  // Chart: tempo médio histórico por status
-  const avgHist = (desk.avgTimeByStatus || []).filter(a => a.avgHours > 0).slice(0, 12);
-  makeChart('chart-avg-status-hist', {
-    type: 'bar',
-    data: {
-      labels: avgHist.map(a => a.status.replace('Aguardando', 'Ag.').replace('Manutenção', 'Manut.').replace('tratativa p/ devolução cliente', 'Devolução')),
-      datasets: [
-        { label: 'Média Real (h)', data: avgHist.map(a => parseFloat(a.avgHours.toFixed(1))), backgroundColor: C.yellow, borderRadius: 4 },
-        { label: 'SLA (h)', data: avgHist.map(a => a.sla || 0), backgroundColor: 'rgba(224,82,82,0.3)', borderRadius: 4 }
-      ]
-    },
-    options: {
-      indexAxis: 'y',
-      plugins: { legend: { position: 'bottom' } },
-      scales: { x: { beginAtZero: true, ticks: { callback: v => v + 'h' } } }
-    }
-  });
-
-  // Chart: tendência mensal
-  const trend = desk.monthlyTrend || {};
-  const trendMonths = Object.keys(trend).sort();
-  makeChart('chart-monthly-trend', {
-    type: 'bar',
-    data: {
-      labels: trendMonths,
-      datasets: [
-        { label: 'Abertos', data: trendMonths.map(m => trend[m].opened), backgroundColor: C.blue, borderRadius: 3 },
-        { label: 'Fechados', data: trendMonths.map(m => trend[m].closed), backgroundColor: C.green, borderRadius: 3 }
-      ]
-    },
-    options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
-  });
-
-  // SLA by status table (atual)
-  document.getElementById('tbody-sla-status').innerHTML = statusEntries.map(([status, v]) => {
-    const avg = v.total > 0 ? (v.totalHours / v.total).toFixed(1) : '—';
-    return `<tr>
-      <td>${status}</td>
-      <td class="num">${v.total}</td>
-      <td class="num" style="color:var(--green)">${v.ok}</td>
-      <td class="num" style="color:var(--orange)">${v.atencao}</td>
-      <td class="num" style="color:var(--red)">${v.vencido}</td>
-      <td class="num">${avg}h</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray2);">Sem dados</td></tr>';
-
-  // Chart: by technician (atual)
-  const techEntries = Object.entries(desk.byTechnician).sort((a, b) => b[1].total - a[1].total).slice(0, 10);
-  makeChart('chart-tech', {
-    type: 'bar',
-    data: {
-      labels: techEntries.map(([n]) => n.split(' ')[0]),
-      datasets: [
-        { label: 'OK', data: techEntries.map(([, v]) => v.ok), backgroundColor: C.green, borderRadius: 3 },
-        { label: 'Atenção', data: techEntries.map(([, v]) => v.atencao), backgroundColor: C.orange, borderRadius: 3 },
-        { label: 'Vencido', data: techEntries.map(([, v]) => v.vencido), backgroundColor: C.red, borderRadius: 3 }
-      ]
-    },
-    options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
-  });
-
-  // Tech histórico table
-  const techHist = (desk.avgTimeByAgent || []).slice(0, 10);
-  const elTechHist = document.getElementById('tbody-tech-hist');
-  if (elTechHist) {
-    elTechHist.innerHTML = techHist.map(t => {
-      const resolvePct = t.count > 0 ? Math.round(t.closed/t.count*100) : 0;
-      const cls = resolvePct >= 60 ? 'ok' : resolvePct >= 30 ? 'atencao' : 'vencido';
-      return `<tr>
-        <td style="color:var(--yellow);font-weight:600;">${t.name}</td>
-        <td class="num">${t.count}</td>
-        <td class="num" style="color:var(--green)">${t.closed}</td>
-        <td class="num">${t.avgHours > 0 ? t.avgHours.toFixed(1)+'h' : '—'}</td>
-        <td><div class="prog-bar"><div class="fill ${cls}" style="width:${resolvePct}%"></div></div>
-            <div style="font-size:11px;color:var(--gray2);margin-top:2px;">${resolvePct}% resolvidos</div></td>
-      </tr>`;
-    }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray2);">Sem dados históricos</td></tr>';
-  }
-
-  // Tech SLA atual table
-  document.getElementById('tbody-tech').innerHTML = techEntries.map(([name, v]) => {
-    const pct = v.total > 0 ? Math.round(v.ok/v.total*100) : 0;
-    const cls = pct >= 80 ? 'ok' : pct >= 60 ? 'atencao' : 'vencido';
-    return `<tr>
-      <td style="color:var(--yellow);font-weight:600;">${name}</td>
-      <td class="num">${v.total}</td>
-      <td class="num" style="color:var(--green)">${v.ok}</td>
-      <td class="num" style="color:var(--orange)">${v.atencao}</td>
-      <td class="num" style="color:var(--red)">${v.vencido}</td>
-      <td><div class="prog-bar"><div class="fill ${cls}" style="width:${pct}%"></div></div><div style="font-size:11px;color:var(--gray2);margin-top:2px;">${pct}% no prazo</div></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray2);">Sem dados</td></tr>';
-}
-
-// ─── IMPORTAÇÕES ─────────────────────────────────────────────────────
-function renderImportacoes(d) {
-  const r = d.rma;
-
-  // Components table
-  document.getElementById('tbody-components').innerHTML = r.topComponents.map(c => `
-    <tr>
-      <td style="font-family:'Barlow Condensed',sans-serif;">${c.sku}</td>
-      <td>${c.model || '—'}</td>
-      <td class="num">${c.count}</td>
-      <td class="num" style="color:var(--blue)">${c.warranty}</td>
-      <td class="num" style="color:var(--red)">${c.noWarranty}</td>
-    </tr>
-  `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray2);">Sem dados de componentes</td></tr>';
-
-  // Monthly consumption chart
-  const months = Object.keys(r.monthlyConsumption).sort();
-  const totalByMonth = months.map(m => Object.values(r.monthlyConsumption[m]).reduce((s, v) => s + v.total, 0));
-  const warrantyByMonth = months.map(m => Object.values(r.monthlyConsumption[m]).reduce((s, v) => s + v.warranty, 0));
-  const noWarrantyByMonth = months.map(m => Object.values(r.monthlyConsumption[m]).reduce((s, v) => s + v.noWarranty, 0));
-
-  makeChart('chart-monthly', {
-    type: 'bar',
-    data: {
-      labels: months,
-      datasets: [
-        { label: 'Em Garantia', data: warrantyByMonth, backgroundColor: C.blue, borderRadius: 3 },
-        { label: 'Fora de Garantia', data: noWarrantyByMonth, backgroundColor: C.red, borderRadius: 3 }
-      ]
-    },
-    options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
-  });
-
-  // Spare parts table
-  renderSpareParts();
-
-  // Sankhya table
-  if (d.sankhya.length > 0) {
-    const keys = Object.keys(d.sankhya[0]);
-    document.getElementById('thead-sankhya').innerHTML = keys.map(k => `<th>${k}</th>`).join('');
-    document.getElementById('tbody-sankhya').innerHTML = d.sankhya.slice(0, 100).map(row =>
-      `<tr>${keys.map(k => `<td>${row[k] || '—'}</td>`).join('')}</tr>`
-    ).join('');
-  } else {
-    document.getElementById('tbody-sankhya').innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--gray2);">Faça upload do CSV do Sankhya na aba Dados</td></tr>';
-  }
-}
-
-// Spare parts rendering + stock min
-let stockMins = JSON.parse(localStorage.getItem('stockMins') || '{}');
-
-function renderSpareParts() {
-  if (!state.report) return;
-  const parts = state.report.spareParts;
-  const search = document.getElementById('search-parts')?.value.toLowerCase() || '';
-  const filtered = parts.filter(p =>
-    p.modelo?.toLowerCase().includes(search) ||
-    p.sku?.toLowerCase().includes(search) ||
-    p.categoria?.toLowerCase().includes(search)
-  );
-
-  document.getElementById('tbody-spare').innerHTML = filtered.map(p => {
-    const min = stockMins[p.sku] || 0;
-    const alert = p.totalFisico <= min && min > 0;
-    const statusBadge = alert
-      ? `<span class="badge vencido">⚠️ Crítico</span>`
-      : min > 0 ? `<span class="badge ok">OK</span>` : `<span style="color:var(--gray2);font-size:11px;">—</span>`;
-    return `<tr class="${alert ? 'alert-row' : ''}">
-      <td>${p.fornecedor || ''}</td>
-      <td>${p.categoria}</td>
-      <td style="font-family:'Barlow Condensed',sans-serif;">${p.sku}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.modelo}">${p.modelo}</td>
-      <td class="num">${p.quantidade}</td>
-      <td class="num">${p.saida}</td>
-      <td class="num" style="font-weight:600;">${p.totalFisico}</td>
-      <td class="num"><input class="stock-min-input" type="number" min="0" value="${min}" onchange="updateMin('${p.sku}', this.value)" data-sku="${p.sku}"/></td>
-      <td>${statusBadge}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--gray2);">Faça upload do CSV de Spare Parts na aba Dados</td></tr>';
-}
-
-function updateMin(sku, val) {
-  stockMins[sku] = parseInt(val) || 0;
-}
-
-async function saveStockMins() {
-  localStorage.setItem('stockMins', JSON.stringify(stockMins));
-  try {
-    await fetch('/api/stock-min', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stockMins) });
-  } catch {}
-  renderSpareParts();
-  alert('Estoque mínimo salvo!');
-}
-
-// ─── FILE UPLOAD ─────────────────────────────────────────────────────
-function handleFile(type, input) {
-  const file = input.files[0];
-  if (!file) return;
-  state.files[type] = file;
-  const nameEl = document.getElementById(`fname-${type}`);
-  if (nameEl) nameEl.textContent = file.name;
-}
-
-async function uploadFile(type) {
-  const endpoints = { rma: '/api/upload/rma', spare: '/api/upload/spare-parts', sankhya: '/api/upload/sankhya' };
-  const file = state.files[type];
-  const statusEl = document.getElementById(`status-${type}`);
-  if (!file) { if (statusEl) { statusEl.style.display='block'; statusEl.className='upload-status err'; statusEl.textContent='Selecione um arquivo primeiro.'; } return; }
-
-  const fd = new FormData();
-  fd.append('file', file);
-  try {
-    statusEl.style.display = 'block';
-    statusEl.className = 'upload-status';
-    statusEl.textContent = 'Enviando...';
-    const res = await fetch(endpoints[type], { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.ok) {
-      statusEl.className = 'upload-status ok';
-      statusEl.textContent = `✅ ${data.count} registros carregados`;
-      loadData();
-    } else {
-      statusEl.className = 'upload-status err';
-      statusEl.textContent = `Erro: ${data.error}`;
-    }
+    res.json({ ticketId, statusTimes, statusChanges });
   } catch (e) {
-    statusEl.className = 'upload-status err';
-    statusEl.textContent = `Erro: ${e.message}`;
+    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
+});
+
+// ─── CSV Parsers ─────────────────────────────────────────────────────
+function parseRmaCsv(buffer) {
+  const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
+  return records.map(r => ({
+    fornecedor: r['Fornecedor'] || '',
+    deskNum: r['Desk #'] || '',
+    model: r['Model #'] || '',
+    sku: r['SKU'] || '',
+    fault: r['Fault description'] || '',
+    testDate: r['Test Date in the lab'] || '',
+    validation: r['Validation'] || '',
+    service: r['Service Performed'] || '',
+    skuComponents: r['SKU dos componentes consumidos no reparo'] || '',
+    componentModel: r['Model PCB / Component'] || '',
+    businessUnit: r['Business Unit'] || '',
+    addedTime: r['Added Time'] || ''
+  }));
 }
 
-// ─── SOURCE STATUS ───────────────────────────────────────────────────
-function renderSourceStatus(ds) {
-  const items = [
-    { key: 'desk', label: 'Zoho Desk', desc: 'API automática — atualiza a cada 2h' },
-    { key: 'rma', label: 'RMA Zoho Forms', desc: 'Upload manual de CSV' },
-    { key: 'sankhya', label: 'Sankhya Importações', desc: 'Upload manual de CSV' },
-    { key: 'spareParts', label: 'Spare Parts', desc: 'Upload manual de CSV' }
-  ];
-  document.getElementById('source-status').innerHTML = items.map(i => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--bg3);border-radius:4px;border:1px solid var(--border);">
-      <div>
-        <div style="font-weight:600;font-size:13px;">${i.label}</div>
-        <div style="font-size:11px;color:var(--gray2);margin-top:2px;">${i.desc}</div>
-      </div>
-      <span class="ds-badge ${ds[i.key] ? 'ok' : 'missing'}">${ds[i.key] ? '● Carregado' : '○ Sem dados'}</span>
-    </div>
-  `).join('');
+function parseSankhyaCsv(buffer) {
+  return csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
 }
 
-// ─── DRAG & DROP ─────────────────────────────────────────────────────
-['rma', 'spare', 'sankhya'].forEach(type => {
-  const zone = document.getElementById(`zone-${type}`);
-  if (!zone) return;
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      state.files[type] = file;
-      const nameEl = document.getElementById(`fname-${type}`);
-      if (nameEl) nameEl.textContent = file.name;
+function parseSheetsCsv(buffer) {
+  const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
+  return records.map(r => ({
+    fornecedor: r['Fornecedor'] || '',
+    categoria: r['Categoria'] || '',
+    sku: r['SKU'] || '',
+    modelo: r['Modelo'] || '',
+    quantidade: parseFloat(r['Quantidade']) || 0,
+    saida: parseFloat(r['Saida']) || 0,
+    totalFisico: parseFloat(r['Total Fisico']) || 0
+  })).filter(r => r.sku);
+}
+
+// ─── Supabase loader ─────────────────────────────────────────────────
+async function getFromDb(key, memKey) {
+  if (memCache[memKey].data && Date.now() - memCache[memKey].ts < MEM_TTL) return memCache[memKey];
+  const row = await dbGet(key);
+  if (row.value) {
+    const actualData = row.value && row.value.data !== undefined ? row.value.data : row.value;
+    const actualUpdatedAt = (row.value && row.value.updated_at) ? row.value.updated_at : row.updated_at;
+    memCache[memKey] = { data: actualData, ts: Date.now(), updated_at: actualUpdatedAt };
+  }
+  return memCache[memKey];
+}
+
+// ─── Upload routes ────────────────────────────────────────────────────
+app.post('/api/upload/rma', upload.single('file'), async (req, res) => {
+  try {
+    const data = parseRmaCsv(req.file.buffer);
+    const updated_at = new Date().toISOString();
+    await dbSet('rma', { data, updated_at });
+    memCache.rma = { data, ts: Date.now(), updated_at };
+    res.json({ ok: true, count: data.length, updated_at });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/upload/sankhya', upload.single('file'), async (req, res) => {
+  try {
+    const data = parseSankhyaCsv(req.file.buffer);
+    const updated_at = new Date().toISOString();
+    await dbSet('sankhya', { data, updated_at });
+    memCache.sankhya = { data, ts: Date.now(), updated_at };
+    res.json({ ok: true, count: data.length, updated_at });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/upload/spare-parts', upload.single('file'), async (req, res) => {
+  try {
+    const data = parseSheetsCsv(req.file.buffer);
+    const updated_at = new Date().toISOString();
+    await dbSet('spare_parts', { data, updated_at });
+    memCache.sheets = { data, ts: Date.now(), updated_at };
+    res.json({ ok: true, count: data.length, updated_at });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/stock-min', async (req, res) => {
+  const current = (await dbGet('stock_min')).value || {};
+  const merged = { ...current, ...req.body };
+  await dbSet('stock_min', merged);
+  memCache.stockMin = { data: merged, ts: Date.now() };
+  res.json({ ok: true });
+});
+
+// ─── Report endpoint (usa tickets passados pelo frontend) ─────────────
+app.post('/api/report', async (req, res) => {
+  try {
+    const { from, to, tickets: allTickets = [] } = req.body;
+    const fromDate = from ? new Date(from) : new Date(0);
+    const toDate = to ? new Date(to) : new Date();
+
+    const openTickets = allTickets.filter(t => !t.closedTime);
+    const periodTickets = allTickets.filter(t => {
+      const d = new Date(t.createdTime);
+      return d >= fromDate && d <= toDate;
+    });
+
+    // SLA atual — abertos
+    const slaByStatus = {}, technicians = {};
+    for (const t of openTickets) {
+      const slaS = getSlaStatus(t.status, t.hoursInCurrentStatus || 0);
+      if (!slaByStatus[t.status]) slaByStatus[t.status] = { total: 0, ok: 0, atencao: 0, vencido: 0, totalHours: 0 };
+      slaByStatus[t.status].total++;
+      slaByStatus[t.status][slaS]++;
+      slaByStatus[t.status].totalHours += t.hoursInCurrentStatus || 0;
+      if (!technicians[t.assigneeName]) technicians[t.assigneeName] = { total: 0, ok: 0, atencao: 0, vencido: 0 };
+      technicians[t.assigneeName].total++;
+      technicians[t.assigneeName][slaS]++;
     }
+
+    // Tendência mensal
+    const monthlyTrend = {};
+    for (const t of periodTickets) {
+      const month = t.createdTime?.substring(0, 7) || 'N/A';
+      if (!monthlyTrend[month]) monthlyTrend[month] = { opened: 0, closed: 0 };
+      monthlyTrend[month].opened++;
+      if (t.closedTime) monthlyTrend[month].closed++;
+    }
+
+    // Performance por técnico — fechados do período
+    const closedPeriod = periodTickets.filter(t => t.closedTime);
+    const avgTimeByAgent = {};
+    for (const t of closedPeriod) {
+      if (!avgTimeByAgent[t.assigneeName]) avgTimeByAgent[t.assigneeName] = { totalHours: 0, count: 0 };
+      avgTimeByAgent[t.assigneeName].totalHours += t.totalHours || 0;
+      avgTimeByAgent[t.assigneeName].count++;
+    }
+
+    // RMA
+    const rmaCache = await getFromDb('rma', 'rma');
+    const rma = (rmaCache.data || []).filter(r => {
+      const d = new Date(r.testDate);
+      return d >= fromDate && d <= toDate;
+    });
+
+    // Spare Parts + Sankhya
+    const sankhyaCache = await getFromDb('sankhya', 'sankhya');
+    const sheetsCache = await getFromDb('spare_parts', 'sheets');
+    const stockMinCache = await getFromDb('stock_min', 'stockMin');
+    const stockMins = stockMinCache.data || {};
+    const spareParts = (sheetsCache.data || []).map(p => ({
+      ...p, minStock: stockMins[p.sku] || 0,
+      alert: p.quantidade <= (stockMins[p.sku] || 0) && (stockMins[p.sku] || 0) > 0
+    }));
+
+    // RMA processing
+    const productCount = {}, faultCount = {}, lineCount = {}, serviceCount = {};
+    const warrantyCount = { warranty: 0, noWarranty: 0, noWarrantyMaint: 0 };
+    const componentConsumption = {}, monthlyConsumption = {};
+
+    for (const r of rma) {
+      const modelKey = r.model || 'Desconhecido';
+      if (!productCount[modelKey]) productCount[modelKey] = { count: 0, sku: r.sku, fornecedor: r.fornecedor };
+      productCount[modelKey].count++;
+      const faultCat = r.fault.split(' - ')[0] || r.fault;
+      faultCount[faultCat] = (faultCount[faultCat] || 0) + 1;
+      lineCount[r.fornecedor] = (lineCount[r.fornecedor] || 0) + 1;
+      serviceCount[r.service] = (serviceCount[r.service] || 0) + 1;
+      const v = r.validation.toLowerCase();
+      if (v.includes('no warranty maintenance')) warrantyCount.noWarrantyMaint++;
+      else if (v.includes('no warranty')) warrantyCount.noWarranty++;
+      else if (v.includes('warranty')) warrantyCount.warranty++;
+
+      if (r.skuComponents && r.skuComponents !== 'Sem SKU') {
+        const skus = r.skuComponents.split(',').map(s => s.trim()).filter(Boolean);
+        for (const sku of skus) {
+          if (!componentConsumption[sku]) componentConsumption[sku] = { count: 0, warranty: 0, noWarranty: 0, model: r.componentModel };
+          componentConsumption[sku].count++;
+          if (v.includes('no warranty')) componentConsumption[sku].noWarranty++;
+          else componentConsumption[sku].warranty++;
+        }
+        const month = r.testDate ? r.testDate.substring(3, 10) : 'N/A';
+        if (!monthlyConsumption[month]) monthlyConsumption[month] = {};
+        for (const sku of skus) {
+          if (!monthlyConsumption[month][sku]) monthlyConsumption[month][sku] = { total: 0, warranty: 0, noWarranty: 0 };
+          monthlyConsumption[month][sku].total++;
+          if (v.includes('no warranty')) monthlyConsumption[month][sku].noWarranty++;
+          else monthlyConsumption[month][sku].warranty++;
+        }
+      }
+    }
+
+    const topProducts = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
+    const topFaults = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
+    const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
+    // RMA raw para cruzamento com histórico Desk (apenas campos necessários)
+    const rmaRaw = rma.map(r => ({ deskNum: r.deskNum, validation: r.validation }));
+
+    res.json({
+      updatedAt: new Date().toISOString(),
+      desk: {
+        total: openTickets.length,
+        totalClosed: allTickets.filter(t => t.closedTime).length,
+        totalHistorico: periodTickets.length,
+        slaByStatus, byTechnician: technicians,
+        avgTimeByStatus: [],
+        avgTimeByAgent: Object.entries(avgTimeByAgent).map(([name, v]) => ({
+          name, avgHours: v.count > 0 ? v.totalHours / v.count : 0, count: v.count, closed: v.count
+        })).sort((a, b) => b.count - a.count),
+        monthlyTrend
+      },
+      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw },
+      spareParts,
+      sankhya: (sankhyaCache.data || []).slice(0, 500),
+      dataStatus: {
+        desk: allTickets.length > 0,
+        rma: (rmaCache.data || []).length > 0,
+        sankhya: (sankhyaCache.data || []).length > 0,
+        spareParts: spareParts.length > 0
+      },
+      lastUpdated: {
+        rma: rmaCache.updated_at || null,
+        sankhya: sankhyaCache.updated_at || null,
+        spareParts: sheetsCache.updated_at || null
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Histórico de um ticket ─────────────────────────────────────────── v2
+app.get('/api/desk-history', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+    const token = await getDeskToken();
+    await delay(150);
+    const hist = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    const events = hist.data.data || [];
+    res.json({ ticketId, version: 2, eventsCount: events.length, raw: events.slice(0, 2) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+
+// ─── Status ───────────────────────────────────────────────────────────
+app.get('/api/status', async (req, res) => {
+  const rma = await getFromDb('rma', 'rma');
+  const sankhya = await getFromDb('sankhya', 'sankhya');
+  const sheets = await getFromDb('spare_parts', 'sheets');
+  res.json({
+    rma: { loaded: !!(rma.data), count: (rma.data || []).length, updatedAt: rma.updated_at },
+    sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at },
+    sheets: { loaded: !!(sheets.data), count: (sheets.data || []).length, updatedAt: sheets.updated_at }
   });
 });
 
-// ─── AUTO REFRESH ────────────────────────────────────────────────────
-setInterval(loadData, 2 * 60 * 60 * 1000);
-
-// ─── INIT ─────────────────────────────────────────────────────────────
-setPeriodAll(); // Carrega tudo por padrão
-loadData();     // Carrega automaticamente ao abrir a página
-</script>
-</body>
-</html>
+app.use(express.static(path.join(__dirname, '../public')));
+module.exports = app;
