@@ -1121,8 +1121,14 @@ async function loadReport() {
 }
 
 async function loadData() {
-  await loadReport();       // Carrega RMA/Spare Parts imediatamente
-  fetchDeskPages();          // Busca Desk em paralelo paginado
+  await loadReport();       // Carrega RMA/Spare Parts imediatamente (responde ao filtro de data)
+  // Só busca Desk e histórico na primeira carga — filtro de data não reinicia isso
+  if (!deskLoaded && deskTickets.length === 0) {
+    fetchDeskPages();
+  } else if (deskLoaded) {
+    // Desk já carregado — só re-renderiza o SLA com o filtro de data atual
+    renderSlaReport();
+  }
 }
 
 // Salva raw RMA para cruzamento com histórico
