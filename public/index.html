@@ -429,6 +429,30 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
     </div>
   </div>
 
+  <!-- Gráficos de serviço por período -->
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel yellow">
+      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Chamados por garantia -->
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
+      <div class="chart-wrap"><canvas id="chart-garantia-donut"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Total de Chamados por Período <span>por tipo de garantia</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-garantia-periodo"></canvas></div>
+    </div>
+  </div>
+
   <div class="panel">
     <div class="panel-title">Detalhe de Atendimentos RMA</div>
     <div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
@@ -1546,6 +1570,147 @@ function renderProdutos(d) {
       <td>${r.service}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="7" class="empty"><div class="icon">📭</div><p>Sem dados</p></td></tr>';
+
+  // ── Gráficos de serviço por período (trimestral) ──
+  const rmaAll = window._rmaRaw || [];
+
+  // Mapeamento de serviço para categoria
+  function getServicoCategoria(service) {
+    const s = (service || '').toLowerCase();
+    if (s.includes('flawless')) return 'A - Sem Defeito';
+    if (s.includes('analyze') || s.includes('no service')) return 'B - Sem Serviço';
+    if (s.includes('battery') || s.includes('recharge')) return 'C - Recarga Bateria';
+    if (s.includes('pcb replacement')) return 'D - Subst. PCB';
+    if (s.includes('component')) return 'E - Subst. Componentes';
+    if (s.includes('exchange') || s.includes('troca')) return 'F - Troca de Produto';
+    return 'B - Sem Serviço';
+  }
+
+  function getTrimestre(dateStr) {
+    if (!dateStr) return null;
+    const d = parseDataBR(dateStr);
+    if (!d || isNaN(d)) return null;
+    const q = Math.ceil((d.getMonth() + 1) / 3);
+    return `T${q} ${d.getFullYear()}`;
+  }
+
+  // Coleta dados por trimestre
+  const servicosCats = ['A - Sem Defeito','B - Sem Serviço','C - Recarga Bateria','D - Subst. PCB','E - Subst. Componentes','F - Troca de Produto'];
+  const servicoCores = [C.green, C.blue, C.orange, C.yellow, C.purple, C.red];
+
+  const trimestreData = {}; // { 'T1 2025': { 'A - Sem Defeito': count, ... } }
+  const garantiaTrimestre = {}; // { 'T1 2025': { warranty, noWarranty, maintenance } }
+
+  const fromDate = new Date(document.getElementById('date-from').value);
+  const toDate = new Date(document.getElementById('date-to').value);
+
+  for (const r of rmaAll) {
+    const d = parseDataBR(r.addedTime);
+    if (!d || d < fromDate || d > toDate) continue;
+    const trim = getTrimestre(r.addedTime);
+    if (!trim) continue;
+
+    if (!trimestreData[trim]) trimestreData[trim] = {};
+    if (!garantiaTrimestre[trim]) garantiaTrimestre[trim] = { warranty: 0, noWarranty: 0, maintenance: 0 };
+
+    const cat = getServicoCategoria(r.service || '');
+    trimestreData[trim][cat] = (trimestreData[trim][cat] || 0) + 1;
+
+    const v = (r.validation || '').toLowerCase();
+    if (v.includes('no warranty maintenance')) garantiaTrimestre[trim].maintenance++;
+    else if (v.includes('no warranty')) garantiaTrimestre[trim].noWarranty++;
+    else garantiaTrimestre[trim].warranty++;
+  }
+
+  const trimestres = Object.keys(trimestreData).sort((a, b) => {
+    const [qa, ya] = a.split(' '); const [qb, yb] = b.split(' ');
+    return ya !== yb ? ya - yb : qa.localeCompare(qb);
+  });
+
+  // Chart: serviços por período % 
+  makeChart('chart-servico-pct', {
+    type: 'bar',
+    data: {
+      labels: trimestres,
+      datasets: servicosCats.map((cat, i) => ({
+        label: cat,
+        data: trimestres.map(t => {
+          const total = Object.values(trimestreData[t] || {}).reduce((s, v) => s + v, 0);
+          return total > 0 ? Math.round((trimestreData[t][cat] || 0) / total * 100) : 0;
+        }),
+        backgroundColor: servicoCores[i],
+        borderRadius: 2
+      }))
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, max: 100, ticks: { callback: v => v + '%' } }
+      }
+    }
+  });
+
+  // Chart: serviços por período absoluto
+  makeChart('chart-servico-abs', {
+    type: 'bar',
+    data: {
+      labels: trimestres,
+      datasets: servicosCats.map((cat, i) => ({
+        label: cat,
+        data: trimestres.map(t => trimestreData[t]?.[cat] || 0),
+        backgroundColor: servicoCores[i],
+        borderRadius: 2
+      }))
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+    }
+  });
+
+  // Totais de garantia no período
+  const totalW = Object.values(garantiaTrimestre).reduce((s, v) => s + v.warranty, 0);
+  const totalNW = Object.values(garantiaTrimestre).reduce((s, v) => s + v.noWarranty, 0);
+  const totalM = Object.values(garantiaTrimestre).reduce((s, v) => s + v.maintenance, 0);
+  const totalG = totalW + totalNW + totalM;
+
+  // Chart: donut garantia
+  makeChart('chart-garantia-donut', {
+    type: 'doughnut',
+    data: {
+      labels: ['Garantia', 'Sem Garantia', 'Manutenção Paga'],
+      datasets: [{ data: [totalW, totalNW, totalM], backgroundColor: [C.yellow, C.green, C.orange], borderWidth: 2, borderColor: C.bg2 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      cutout: '65%',
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12 } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/totalG*100)}%)` } }
+      }
+    }
+  });
+
+  // Chart: garantia por período
+  makeChart('chart-garantia-periodo', {
+    type: 'bar',
+    data: {
+      labels: trimestres,
+      datasets: [
+        { label: 'Garantia', data: trimestres.map(t => garantiaTrimestre[t]?.warranty || 0), backgroundColor: C.yellow, borderRadius: 2 },
+        { label: 'Sem Garantia', data: trimestres.map(t => garantiaTrimestre[t]?.noWarranty || 0), backgroundColor: C.green, borderRadius: 2 },
+        { label: 'Manutenção Paga', data: trimestres.map(t => garantiaTrimestre[t]?.maintenance || 0), backgroundColor: C.orange, borderRadius: 2 }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+    }
+  });
 }
 
 // ─── OPERAÇÃO ────────────────────────────────────────────────────────
