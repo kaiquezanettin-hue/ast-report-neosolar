@@ -17,75 +17,89 @@ async function getDeskToken() {
   return zohoToken.access_token;
 }
 
-// Status ignorados no cálculo de lead time
 const STATUS_IGNORADOS = new Set([
   'Aguardando Chegada de Produto na Neosolar',
   'Descarte',
   'Produto despachado AST',
+  'Produto despachado',
   'Aguardando Prazo / Autorização Descarte',
   'Ag. Prazo / Autorização Descarte'
 ]);
 
+async function getHistoryById(ticketId, token) {
+  let allEvents = [];
+  let from = 0;
+  while (true) {
+    await new Promise(r => setTimeout(r, 100));
+    const hist = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=50&from=${from}`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    const events = hist.data.data || [];
+    allEvents = allEvents.concat(events);
+    if (events.length < 50) break;
+    from += 50;
+  }
+
+  let statusChanges = [];
+  for (const e of allEvents) {
+    if (!e.eventInfo) continue;
+    for (const info of e.eventInfo) {
+      if (info.propertyName === 'Status' && info.propertyValue) {
+        const val = info.propertyValue;
+        const toStatus = val.updatedValue || (typeof val === 'string' ? val : null);
+        if (toStatus && !STATUS_IGNORADOS.has(toStatus)) {
+          statusChanges.push({ status: toStatus, from: val.previousValue || null, time: e.eventTime });
+        }
+      }
+    }
+  }
+
+  statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+  const statusTimes = {};
+  for (let i = 0; i < statusChanges.length; i++) {
+    const sName = statusChanges[i].status;
+    const start = new Date(statusChanges[i].time);
+    const end = i < statusChanges.length - 1 ? new Date(statusChanges[i + 1].time) : new Date();
+    const hours = (end - start) / 3600000;
+    if (hours > 0 && hours < 8760) statusTimes[sName] = (statusTimes[sName] || 0) + hours;
+  }
+
+  return { statusTimes, statusChanges, totalEvents: allEvents.length };
+}
+
 module.exports = async (req, res) => {
-  const { ticketId } = req.query;
-  if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+  const { ticketId, ticketNumber } = req.query;
 
   try {
     const token = await getDeskToken();
 
-    // Busca todos os eventos com paginação
-    let allEvents = [];
-    let from = 0;
-    const limit = 50;
-    while (true) {
+    // Modo 1: ticketId direto
+    if (ticketId) {
+      const result = await getHistoryById(ticketId, token);
+      return res.json({ ticketId, ...result });
+    }
+
+    // Modo 2: busca por ticketNumber via Search API
+    if (ticketNumber) {
       await new Promise(r => setTimeout(r, 100));
-      const hist = await axios.get(
-        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=${limit}&from=${from}`,
+      const search = await axios.get(
+        `https://desk.zoho.com/api/v1/tickets/search?ticketNumber=${ticketNumber}&departmentId=${process.env.ZOHO_DEPT_ID}`,
         { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
       );
-      const events = hist.data.data || [];
-      allEvents = allEvents.concat(events);
-      if (events.length < limit) break;
-      from += limit;
-    }
-
-    // Extrai mudanças de status (exclui status ignorados)
-    let statusChanges = [];
-    for (const e of allEvents) {
-      if (!e.eventInfo) continue;
-      for (const info of e.eventInfo) {
-        if (info.propertyName === 'Status' && info.propertyValue) {
-          const val = info.propertyValue;
-          const toStatus = val.updatedValue || (typeof val === 'string' ? val : null);
-          if (toStatus && !STATUS_IGNORADOS.has(toStatus)) {
-            statusChanges.push({
-              status: toStatus,
-              from: val.previousValue || null,
-              time: e.eventTime
-            });
-          }
-        }
+      const tickets = search.data.data || [];
+      if (tickets.length === 0) {
+        return res.json({ ticketNumber, found: false, statusTimes: {}, statusChanges: [] });
       }
+      const id = tickets[0].id;
+      const createdTime = tickets[0].createdTime;
+      const closedTime = tickets[0].closedTime || null;
+      const result = await getHistoryById(id, token);
+      return res.json({ ticketId: id, ticketNumber, createdTime, closedTime, ...result });
     }
 
-    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
-
-    // Calcula tempo em cada status
-    const statusTimes = {};
-    for (let i = 0; i < statusChanges.length; i++) {
-      const sName = statusChanges[i].status;
-      const start = new Date(statusChanges[i].time);
-      // Próxima mudança de status (pulando ignorados já foram filtrados)
-      const end = i < statusChanges.length - 1
-        ? new Date(statusChanges[i + 1].time)
-        : new Date();
-      const hours = (end - start) / 3600000;
-      if (hours > 0 && hours < 8760) {
-        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
-      }
-    }
-
-    res.json({ ticketId, statusTimes, statusChanges, totalEvents: allEvents.length });
+    res.status(400).json({ error: 'ticketId or ticketNumber required' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
