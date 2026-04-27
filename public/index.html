@@ -507,8 +507,8 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
     <div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
       <table class="tbl" id="tbl-spare">
         <thead><tr>
-          <th>Categoria</th><th>SKU</th><th>Modelo</th>
-          <th class="num">Qtd Atual</th><th class="num">Saída</th><th class="num">Total Físico</th>
+          <th>Fornecedor</th><th>Categoria</th><th>SKU</th><th>Modelo</th>
+          <th class="num">Qtd Inicial</th><th class="num">Saída</th><th class="num">Total Físico</th>
           <th class="num">Estoque Mín.</th><th>Status</th>
         </tr></thead>
         <tbody id="tbody-spare"></tbody>
@@ -1051,21 +1051,22 @@ function renderSpareParts() {
 
   document.getElementById('tbody-spare').innerHTML = filtered.map(p => {
     const min = stockMins[p.sku] || 0;
-    const alert = p.quantidade <= min && min > 0;
+    const alert = p.totalFisico <= min && min > 0;
     const statusBadge = alert
       ? `<span class="badge vencido">⚠️ Crítico</span>`
       : min > 0 ? `<span class="badge ok">OK</span>` : `<span style="color:var(--gray2);font-size:11px;">—</span>`;
     return `<tr class="${alert ? 'alert-row' : ''}">
+      <td>${p.fornecedor || ''}</td>
       <td>${p.categoria}</td>
       <td style="font-family:'Barlow Condensed',sans-serif;">${p.sku}</td>
-      <td>${p.modelo}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.modelo}">${p.modelo}</td>
       <td class="num">${p.quantidade}</td>
       <td class="num">${p.saida}</td>
-      <td class="num">${p.totalFisico}</td>
+      <td class="num" style="font-weight:600;">${p.totalFisico}</td>
       <td class="num"><input class="stock-min-input" type="number" min="0" value="${min}" onchange="updateMin('${p.sku}', this.value)" data-sku="${p.sku}"/></td>
       <td>${statusBadge}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--gray2);">Faça upload do CSV de Spare Parts na aba Dados</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--gray2);">Faça upload do CSV de Spare Parts na aba Dados</td></tr>';
 }
 
 function updateMin(sku, val) {
