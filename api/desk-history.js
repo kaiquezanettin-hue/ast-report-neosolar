@@ -23,30 +23,38 @@ module.exports = async (req, res) => {
 
   try {
     const token = await getDeskToken();
-    await new Promise(r => setTimeout(r, 150));
 
-    const hist = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
+    // Busca todos os eventos com paginação
+    let allEvents = [];
+    let from = 0;
+    const limit = 50;
+    while (true) {
+      await new Promise(r => setTimeout(r, 150));
+      const hist = await axios.get(
+        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=${limit}&from=${from}`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+      );
+      const events = hist.data.data || [];
+      allEvents = allEvents.concat(events);
+      if (events.length < limit) break;
+      from += limit;
+    }
 
-    const events = hist.data.data || [];
-
-    // Extrai mudanças de status — tenta todos os formatos conhecidos do Zoho
+    // Extrai mudanças de status
     let statusChanges = [];
-    for (const e of events) {
-      // Formato novo: fieldName/from/to
-      if (e.fieldName === 'Status' && e.to) {
-        statusChanges.push({ status: e.to, time: e.modifiedTime });
-        continue;
-      }
-      // Formato antigo: eventInfo array
-      if (e.eventInfo && Array.isArray(e.eventInfo)) {
-        for (const info of e.eventInfo) {
-          if (info.propertyName !== 'Status') continue;
+    for (const e of allEvents) {
+      if (!e.eventInfo) continue;
+      for (const info of e.eventInfo) {
+        if (info.propertyName === 'Status' && info.propertyValue) {
           const val = info.propertyValue;
-          const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-          if (toStatus) statusChanges.push({ status: toStatus, time: e.eventTime });
+          const toStatus = val.updatedValue || (typeof val === 'string' ? val : null);
+          if (toStatus) {
+            statusChanges.push({
+              status: toStatus,
+              from: val.previousValue || null,
+              time: e.eventTime
+            });
+          }
         }
       }
     }
@@ -67,18 +75,7 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Sempre retorna debug completo
-    return res.json({
-      ticketId,
-      statusTimes,
-      statusChanges,
-      debug: {
-        eventsCount: events.length,
-        events: events
-      }
-    });
-
-    res.json({ ticketId, statusTimes, statusChanges });
+    res.json({ ticketId, statusTimes, statusChanges, totalEvents: allEvents.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
