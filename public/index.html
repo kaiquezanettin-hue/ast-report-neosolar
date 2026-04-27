@@ -758,6 +758,28 @@ const C = {
   red: '#e05252', green: '#52c878', orange: '#e09052', blue: '#5299e0', purple: '#9b59e0',
   bg2: '#242628', bg3: '#2c2e30', border: '#353739'
 };
+// Plugin global para texto no centro do donut
+Chart.register({
+  id: 'centerText',
+  beforeDraw(chart) {
+    if (chart.config.options?.centerText) {
+      const { width, height, ctx } = chart;
+      ctx.save();
+      const txt1 = chart.config.options.centerText.line1;
+      const txt2 = chart.config.options.centerText.line2;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const cx = width / 2, cy = height / 2;
+      ctx.font = 'bold 32px Barlow Condensed, sans-serif';
+      ctx.fillStyle = '#FFFDF0';
+      ctx.fillText(txt1, cx, cy - 10);
+      ctx.font = '11px Barlow, sans-serif';
+      ctx.fillStyle = '#888888';
+      ctx.fillText(txt2, cx, cy + 16);
+      ctx.restore();
+    }
+  }
+});
 Chart.defaults.color = C.gray2;
 Chart.defaults.borderColor = C.border;
 Chart.defaults.font.family = 'Barlow, sans-serif';
@@ -1583,6 +1605,8 @@ function renderProdutos(d) {
     if (s === 'PCB Replacement') return 'D - Subst. PCB';
     if (s === 'Component Replacement' || s === 'Component Replacement - dismantle' || s === 'Component Maintenance') return 'E - Subst. Componentes';
     if (s === 'Product Exchange') return 'F - Troca de Produto';
+    if (s === 'Software upgrade') return 'E - Subst. Componentes';
+    if (s === 'PCB replacement') return 'D - Subst. PCB';
     return 'B - Sem Serviço';
   }
 
@@ -1596,7 +1620,7 @@ function renderProdutos(d) {
 
   // Coleta dados por trimestre
   const servicosCats = ['A - Sem Defeito','B - Sem Serviço','C - Recarga Bateria','D - Subst. PCB','E - Subst. Componentes','F - Troca de Produto'];
-  const servicoCores = [C.green, C.blue, C.orange, C.yellow, C.purple, C.red];
+  const servicoCores = ['#52c878', '#5299e0', '#e09052', '#FFD04C', '#9b59e0', '#e05252'];
 
   const trimestreData = {}; // { 'T1 2025': { 'A - Sem Defeito': count, ... } }
   const garantiaTrimestre = {}; // { 'T1 2025': { warranty, noWarranty, maintenance } }
@@ -1628,47 +1652,46 @@ function renderProdutos(d) {
     return ya !== yb ? ya - yb : qa.localeCompare(qb);
   });
 
-  // Chart: serviços por período % 
-  makeChart('chart-servico-pct', {
-    type: 'bar',
-    data: {
-      labels: trimestres,
-      datasets: servicosCats.map((cat, i) => ({
-        label: cat,
-        data: trimestres.map(t => {
-          const total = Object.values(trimestreData[t] || {}).reduce((s, v) => s + v, 0);
-          return total > 0 ? Math.round((trimestreData[t][cat] || 0) / total * 100) : 0;
-        }),
-        backgroundColor: servicoCores[i],
-        borderRadius: 2
-      }))
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
-      scales: {
-        x: { stacked: true },
-        y: { stacked: true, max: 100, ticks: { callback: v => v + '%' } }
+  const servicoDatasets = (mode) => servicosCats.map((cat, i) => ({
+    label: cat,
+    data: trimestres.map(t => {
+      if (mode === 'pct') {
+        const total = Object.values(trimestreData[t] || {}).reduce((s, v) => s + v, 0);
+        return total > 0 ? Math.round((trimestreData[t]?.[cat] || 0) / total * 100) : 0;
       }
-    }
-  });
+      return trimestreData[t]?.[cat] || 0;
+    }),
+    backgroundColor: servicoCores[i],
+    borderColor: servicoCores[i],
+    borderRadius: 2,
+    stack: 'stack'
+  }));
 
   // Chart: serviços por período absoluto
   makeChart('chart-servico-abs', {
     type: 'bar',
-    data: {
-      labels: trimestres,
-      datasets: servicosCats.map((cat, i) => ({
-        label: cat,
-        data: trimestres.map(t => trimestreData[t]?.[cat] || 0),
-        backgroundColor: servicoCores[i],
-        borderRadius: 2
-      }))
-    },
+    data: { labels: trimestres, datasets: servicoDatasets('abs') },
     options: {
       maintainAspectRatio: false,
-      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 }, color: C.white } } },
+      scales: {
+        x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
+        y: { stacked: true, beginAtZero: true, ticks: { color: C.gray2 } }
+      }
+    }
+  });
+
+  // Chart: serviços por período %
+  makeChart('chart-servico-pct', {
+    type: 'bar',
+    data: { labels: trimestres, datasets: servicoDatasets('pct') },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 }, color: C.white } } },
+      scales: {
+        x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
+        y: { stacked: true, max: 100, ticks: { color: C.gray2, callback: v => v + '%' } }
+      }
     }
   });
 
@@ -1678,39 +1701,78 @@ function renderProdutos(d) {
   const totalM = Object.values(garantiaTrimestre).reduce((s, v) => s + v.maintenance, 0);
   const totalG = totalW + totalNW + totalM;
 
-  // Chart: donut garantia
+  // centerTextPlugin registrado globalmente
+
   makeChart('chart-garantia-donut', {
     type: 'doughnut',
     data: {
-      labels: ['Garantia', 'Sem Garantia', 'Manutenção Paga'],
+      labels: [
+        \`Garantia (\${totalG > 0 ? Math.round(totalW/totalG*100) : 0}%)\`,
+        \`Sem Garantia (\${totalG > 0 ? Math.round(totalNW/totalG*100) : 0}%)\`,
+        \`Manutenção Paga (\${totalG > 0 ? Math.round(totalM/totalG*100) : 0}%)\`
+      ],
       datasets: [{ data: [totalW, totalNW, totalM], backgroundColor: [C.yellow, C.green, C.orange], borderWidth: 2, borderColor: C.bg2 }]
     },
     options: {
       maintainAspectRatio: false,
       cutout: '65%',
+      centerText: { line1: totalG.toString(), line2: 'Total de Chamados' },
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12 } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/totalG*100)}%)` } }
+        legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white, font: { size: 12 } } },
+        tooltip: { callbacks: { label: ctx => \` \${ctx.label}: \${ctx.raw}\` } }
       }
     }
   });
 
-  // Chart: garantia por período
   makeChart('chart-garantia-periodo', {
     type: 'bar',
     data: {
       labels: trimestres,
       datasets: [
-        { label: 'Garantia', data: trimestres.map(t => garantiaTrimestre[t]?.warranty || 0), backgroundColor: C.yellow, borderRadius: 2 },
-        { label: 'Sem Garantia', data: trimestres.map(t => garantiaTrimestre[t]?.noWarranty || 0), backgroundColor: C.green, borderRadius: 2 },
-        { label: 'Manutenção Paga', data: trimestres.map(t => garantiaTrimestre[t]?.maintenance || 0), backgroundColor: C.orange, borderRadius: 2 }
+        { label: 'Garantia', data: trimestres.map(t => garantiaTrimestre[t]?.warranty || 0), backgroundColor: C.yellow, borderRadius: 2, stack: 'g' },
+        { label: 'Sem Garantia', data: trimestres.map(t => garantiaTrimestre[t]?.noWarranty || 0), backgroundColor: C.green, borderRadius: 2, stack: 'g' },
+        { label: 'Manutenção Paga', data: trimestres.map(t => garantiaTrimestre[t]?.maintenance || 0), backgroundColor: C.orange, borderRadius: 2, stack: 'g' }
       ]
     },
     options: {
       maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } },
-      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
-    }
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white } },
+        tooltip: {
+          callbacks: {
+            afterBody: (items) => {
+              const t = trimestres[items[0].dataIndex];
+              const tot = (garantiaTrimestre[t]?.warranty||0) + (garantiaTrimestre[t]?.noWarranty||0) + (garantiaTrimestre[t]?.maintenance||0);
+              const pct = tot > 0 ? Math.round(items[0].raw/tot*100) : 0;
+              return \`\${pct}% do total\`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
+        y: { stacked: true, beginAtZero: true, ticks: { color: C.gray2 } }
+      }
+    },
+    plugins: [{
+      id: 'totalAbove',
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        const nDatasets = chart.data.datasets.length;
+        const lastMeta = chart.getDatasetMeta(nDatasets - 1);
+        lastMeta.data.forEach((bar, i) => {
+          const t = chart.data.labels[i];
+          const total = (garantiaTrimestre[t]?.warranty||0) + (garantiaTrimestre[t]?.noWarranty||0) + (garantiaTrimestre[t]?.maintenance||0);
+          if (!total) return;
+          ctx.save();
+          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
+          ctx.fillStyle = '#FFFDF0';
+          ctx.textAlign = 'center';
+          ctx.fillText(total, bar.x, bar.y - 5);
+          ctx.restore();
+        });
+      }
+    }]
   });
 }
 
