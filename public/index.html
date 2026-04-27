@@ -784,9 +784,21 @@ async function fetchDeskHistory(tickets) {
   const ticketMap = {};
   for (const t of tickets) ticketMap[String(t.ticketNumber)] = t;
 
-  // RMA como lista completa de tickets que passaram pela AST
+  // RMA filtrado pelos últimos 18 meses pela coluna testDate
   const rmaRaw = window._rmaRaw || [];
-  const rmaNumeros = [...new Set(rmaRaw.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0'))];
+  const dezoitoMesesAtras = new Date();
+  dezoitoMesesAtras.setMonth(dezoitoMesesAtras.getMonth() - 18);
+
+  const rmaFiltrado = rmaRaw.filter(r => {
+    if (!r.testDate) return false;
+    // testDate formato DD/MM/YYYY
+    const parts = r.testDate.split('/');
+    if (parts.length !== 3) return false;
+    const d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+    return d >= dezoitoMesesAtras;
+  });
+
+  const rmaNumeros = [...new Set(rmaFiltrado.map(r => String(r.deskNum || '').trim()).filter(n => n && n !== 'undefined' && n !== '0'))];
 
   // Separa: tickets disponíveis no Desk vs tickets antigos só no RMA
   const comId = [];       // têm ticketId disponível
@@ -904,15 +916,15 @@ function renderSlaReport() {
 
   const total = histEntries.length;
 
-  // Agrupa por status e calcula métricas
-  const statusMetrics = {}; // { status: { totalDias, count, dentroSla } }
+  // Agrupa por status — conta tickets únicos por status
+  const statusMetrics = {}; // { status: { totalDias, ticketsUnicos: Set, dentroSla } }
   for (const h of histEntries) {
     for (const [status, hours] of Object.entries(h.statusTimes || {})) {
-      if (!statusMetrics[status]) statusMetrics[status] = { totalDias: 0, count: 0, dentroSla: 0 };
+      if (!statusMetrics[status]) statusMetrics[status] = { totalDias: 0, ticketsUnicos: new Set(), dentroSla: 0 };
       const dias = horasParaDiasUteis(hours);
       const slaDias = SLA_DIAS_UTEIS[status];
       statusMetrics[status].totalDias += dias;
-      statusMetrics[status].count++;
+      statusMetrics[status].ticketsUnicos.add(h.ticketNumber);
       if (!slaDias || dias <= slaDias) statusMetrics[status].dentroSla++;
     }
   }
@@ -924,41 +936,49 @@ function renderSlaReport() {
 
   let rows = '';
   for (const grupo of grupos) {
-    // Linha de grupo
     const statusDoGrupo = Object.entries(statusMetrics).filter(([s]) => STATUS_GRUPOS[s] === grupo);
     if (statusDoGrupo.length === 0) continue;
 
-    // Métricas agregadas do grupo
-    const grpTotal = statusDoGrupo.reduce((a, [, v]) => a + v.count, 0);
+    // Tickets únicos que passaram por qualquer status do grupo
+    const ticketsDoGrupo = new Set();
+    for (const [, v] of statusDoGrupo) v.ticketsUnicos.forEach(t => ticketsDoGrupo.add(t));
+    const grpUnico = ticketsDoGrupo.size;
+
+    // Soma do SLA de todos os status do grupo
+    const grpSlaSoma = statusDoGrupo.reduce((a, [s]) => a + (SLA_DIAS_UTEIS[s] || 0), 0);
+
+    // Métricas agregadas
+    const grpTotalOcorr = statusDoGrupo.reduce((a, [, v]) => a + v.ticketsUnicos.size, 0);
     const grpDias = statusDoGrupo.reduce((a, [, v]) => a + v.totalDias, 0);
     const grpDentro = statusDoGrupo.reduce((a, [, v]) => a + v.dentroSla, 0);
-    const grpMediaDias = grpTotal > 0 ? grpDias / grpTotal : 0;
-    const grpSla = grpTotal > 0 ? Math.round(grpDentro / grpTotal * 100) : 0;
-    const grpFreq = total > 0 ? Math.round(grpTotal / total * 100) : 0;
+    const grpMediaDias = grpTotalOcorr > 0 ? grpDias / grpTotalOcorr : 0;
+    const grpSla = grpTotalOcorr > 0 ? Math.round(grpDentro / grpTotalOcorr * 100) : 0;
+    const grpFreq = total > 0 ? Math.round(grpUnico / total * 100) : 0;
     const grpColor = grpSla >= 80 ? C.green : grpSla >= 50 ? C.orange : C.red;
 
     rows += `<tr style="background:rgba(255,255,255,0.05);">
       <td style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--yellow);">${grupo}</td>
       <td class="num" style="font-weight:600;">${grpMediaDias.toFixed(2)}</td>
       <td class="num"><span style="color:${grpColor};font-weight:600;">${grpSla}%</span></td>
-      <td class="num">${statusDoGrupo.map(([s]) => SLA_DIAS_UTEIS[s] || '—').join('/')}</td>
-      <td class="num">${grpTotal}</td>
+      <td class="num" style="font-weight:600;">${grpSlaSoma > 0 ? grpSlaSoma.toFixed(2) : '—'}</td>
+      <td class="num">${grpUnico}</td>
       <td class="num">${grpFreq}%</td>
     </tr>`;
 
     // Linhas de sub-status
-    for (const [status, v] of statusDoGrupo.sort((a, b) => b[1].count - a[1].count)) {
-      const mediaDias = v.count > 0 ? v.totalDias / v.count : 0;
-      const pctSla = v.count > 0 ? Math.round(v.dentroSla / v.count * 100) : 0;
-      const freq = total > 0 ? Math.round(v.count / total * 100) : 0;
+    for (const [status, v] of statusDoGrupo.sort((a, b) => b[1].ticketsUnicos.size - a[1].ticketsUnicos.size)) {
+      const unicos = v.ticketsUnicos.size;
+      const mediaDias = unicos > 0 ? v.totalDias / unicos : 0;
+      const pctSla = unicos > 0 ? Math.round(v.dentroSla / unicos * 100) : 0;
+      const freq = total > 0 ? Math.round(unicos / total * 100) : 0;
       const slaDias = SLA_DIAS_UTEIS[status] || null;
       const color = pctSla >= 80 ? C.green : pctSla >= 50 ? C.orange : C.red;
       rows += `<tr>
         <td style="padding-left:20px;color:var(--gray2);">${status}</td>
         <td class="num">${mediaDias.toFixed(2)}</td>
         <td class="num"><span style="color:${color};">● ${pctSla}%</span></td>
-        <td class="num">${slaDias || '—'}</td>
-        <td class="num">${v.count}</td>
+        <td class="num">${slaDias !== null ? slaDias : '—'}</td>
+        <td class="num">${unicos}</td>
         <td class="num">${freq}%</td>
       </tr>`;
     }
