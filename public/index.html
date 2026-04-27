@@ -134,7 +134,10 @@ header {
 
 /* ── MAIN ── */
 main { padding: 24px; max-width: 1400px; margin: 0 auto; }
-.tab-content.fullwidth { margin: 0 -24px; padding: 0 24px; max-width: none; width: calc(100% + 48px); }
+.tab-content.fullwidth { margin: 0 -24px; padding: 0 24px; max-width: none; width: calc(100vw - 0px); box-sizing: border-box; }
+.tab-content.fullwidth .panel { border-radius: 4px; }
+.tab-content.fullwidth table { width: 100%; }
+.tab-content.fullwidth th:first-child, .tab-content.fullwidth td:first-child { width: 35%; min-width: 280px; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -554,14 +557,14 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
   <div class="panel yellow" style="margin-bottom:16px;">
     <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span></div>
     <div style="overflow-x:auto;">
-      <table class="tbl" id="tbl-sla-hist">
+      <table class="tbl" id="tbl-sla-hist" style="width:100%;">
         <thead><tr>
-          <th>Subclassificações</th>
-          <th class="num">Média Resolução (dias úteis)</th>
-          <th class="num">% Conclusão SLA</th>
-          <th class="num">SLA Dias Úteis</th>
-          <th class="num">Qtde Casos</th>
-          <th class="num">% Frequência</th>
+          <th style="width:35%;">Subclassificações</th>
+          <th class="num" style="width:13%;">Média Resolução (dias úteis)</th>
+          <th class="num" style="width:13%;">% Conclusão SLA</th>
+          <th class="num" style="width:13%;">SLA Dias Úteis</th>
+          <th class="num" style="width:13%;">Qtde Casos</th>
+          <th class="num" style="width:13%;">% Frequência</th>
         </tr></thead>
         <tbody id="tbody-sla-hist">
           <tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguardando carregamento do histórico de tickets...</td></tr>
@@ -573,7 +576,7 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
   <!-- Gráfico % SLA por mês -->
   <div class="panel blue">
     <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
-    <div class="chart-wrap" style="height:360px;"><canvas id="chart-sla-mensal"></canvas></div>
+    <div style="position:relative;height:380px;width:100%;"><canvas id="chart-sla-mensal"></canvas></div>
   </div>
 </div>
 
@@ -719,8 +722,6 @@ const STATUS_GRUPOS = {
   'Em teste': 'AVALIAÇÃO',
   'Ag. teste': 'AVALIAÇÃO',
   // TÉCNICO
-  'Aguardando aprovaçao de manutençao (SG)': 'TÉCNICO',
-  'Ag. aprovação manutenção (SG)': 'TÉCNICO',
   'Aguardando manutençao (SG)': 'TÉCNICO',
   'Em manutençao': 'TÉCNICO',
   'Em manutenção': 'TÉCNICO',
@@ -728,6 +729,9 @@ const STATUS_GRUPOS = {
   'Aguardando RMA': 'TÉCNICO',
   'Ag. Peça Reposição': 'TÉCNICO',
   'Aguardando Peça Reposição': 'TÉCNICO',
+  // PAGAMENTO
+  'Aguardando aprovaçao de manutençao (SG)': 'PAGAMENTO',
+  'Ag. aprovação manutenção (SG)': 'PAGAMENTO',
   // DEVOLUÇÃO (sem Descarte e Produto despachado AST)
   'Em tratativa p/ devoluçao cliente': 'DEVOLUÇÃO',
   'Em tratativa p/ devolução cliente': 'DEVOLUÇÃO',
@@ -745,6 +749,7 @@ const SLA_DIAS_UTEIS = {
   'Em manutençao': 0.25,
   'Em manutenção': 0.25,
   'Aguardando aprovaçao de manutençao (SG)': 2.0,
+  'Ag. aprovação manutenção (SG)': 2.0,
   'Aguardando manutençao (SG)': 1.0,
   'Aguardando laudo': 0.13,
   'Aguardando RMA': 0.5,
@@ -754,9 +759,102 @@ const SLA_DIAS_UTEIS = {
   'Aguardando coleta': 1.0
 };
 
-// Converte horas para dias úteis (~8h/dia)
-function horasParaDiasUteis(horas) {
-  return horas / 8;
+// ─── Cálculo de dias úteis reais ─────────────────────────────────────
+
+// Páscoa (algoritmo de Meeus/Jones/Butcher)
+function calcPascoa(ano) {
+  const a = ano % 19, b = Math.floor(ano/100), c = ano % 100;
+  const d = Math.floor(b/4), e = b % 4, f = Math.floor((b+8)/25);
+  const g = Math.floor((b-f+1)/3), h = (19*a+b-d-g+15) % 30;
+  const i = Math.floor(c/4), k = c % 4;
+  const l = (32+2*e+2*i-h-k) % 7;
+  const m = Math.floor((a+11*h+22*l)/451);
+  const mes = Math.floor((h+l-7*m+114)/31);
+  const dia = ((h+l-7*m+114) % 31) + 1;
+  return new Date(ano, mes-1, dia);
+}
+
+function getFeriadosBR(ano) {
+  const pascoa = calcPascoa(ano);
+  const addDias = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+  const feriados = new Set([
+    // Fixos
+    `${ano}-01-01`, // Ano Novo
+    `${ano}-04-21`, // Tiradentes
+    `${ano}-05-01`, // Dia do Trabalho
+    `${ano}-09-07`, // Independência
+    `${ano}-10-12`, // Nossa Sra Aparecida
+    `${ano}-11-02`, // Finados
+    `${ano}-11-15`, // Proclamação da República
+    `${ano}-12-25`, // Natal
+    // Móveis baseados na Páscoa
+    fmt(addDias(pascoa, -48)), // Carnaval (2a)
+    fmt(addDias(pascoa, -47)), // Carnaval (3a)
+    fmt(addDias(pascoa, -2)),  // Sexta-feira Santa
+    fmt(pascoa),               // Páscoa
+    fmt(addDias(pascoa, 60)),  // Corpus Christi
+  ]);
+  return feriados;
+}
+
+// Cache de feriados por ano
+const _feriadosCache = {};
+function getFeriados(ano) {
+  if (!_feriadosCache[ano]) _feriadosCache[ano] = getFeriadosBR(ano);
+  return _feriadosCache[ano];
+}
+
+// Calcula dias úteis entre duas datas (considerando 8h/dia útil)
+function diasUteisEntre(inicio, fim) {
+  if (!inicio || !fim || fim <= inicio) return 0;
+  let total = 0;
+  const cur = new Date(inicio);
+  // Trabalha em incrementos de 1 hora para precisão
+  const horas = (fim - inicio) / 3600000;
+  if (horas <= 0) return 0;
+
+  // Para períodos curtos (< 30 dias), conta hora a hora
+  if (horas <= 720) {
+    let horasUteis = 0;
+    const d = new Date(inicio);
+    while (d < fim) {
+      const dow = d.getDay();
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const feriados = getFeriados(d.getFullYear());
+      if (dow !== 0 && dow !== 6 && !feriados.has(dateStr)) {
+        horasUteis++;
+      }
+      d.setTime(d.getTime() + 3600000);
+    }
+    return horasUteis / 8;
+  }
+
+  // Para períodos longos, conta dia a dia
+  let diasUteis = 0;
+  const dataFim = new Date(fim);
+  dataFim.setHours(0,0,0,0);
+  const dataInicio = new Date(inicio);
+  dataInicio.setHours(0,0,0,0);
+
+  const d2 = new Date(dataInicio);
+  while (d2 < dataFim) {
+    const dow = d2.getDay();
+    const dateStr = `${d2.getFullYear()}-${String(d2.getMonth()+1).padStart(2,'0')}-${String(d2.getDate()).padStart(2,'0')}`;
+    const feriados = getFeriados(d2.getFullYear());
+    if (dow !== 0 && dow !== 6 && !feriados.has(dateStr)) diasUteis++;
+    d2.setDate(d2.getDate() + 1);
+  }
+  return diasUteis;
+}
+
+// Converte horas corridas para dias úteis reais
+function horasParaDiasUteis(horas, startTime) {
+  if (!startTime || horas <= 0) return horas / 8; // fallback simples
+  const inicio = new Date(startTime);
+  const fim = new Date(inicio.getTime() + horas * 3600000);
+  return diasUteisEntre(inicio, fim);
 }
 
 // Status ignorados no histórico e no cálculo de SLA
@@ -930,7 +1028,7 @@ function renderSlaReport() {
   for (const h of histEntries) {
     for (const [status, hours] of Object.entries(h.statusTimes || {})) {
       if (!statusMetrics[status]) statusMetrics[status] = { totalDias: 0, ticketsUnicos: new Set(), dentroSla: 0 };
-      const dias = horasParaDiasUteis(hours);
+      const dias = horasParaDiasUteis(hours, h.createdTime);
       const slaDias = SLA_DIAS_UTEIS[status];
       statusMetrics[status].totalDias += dias;
       statusMetrics[status].ticketsUnicos.add(h.ticketNumber);
@@ -939,7 +1037,7 @@ function renderSlaReport() {
   }
 
   // Monta tabela agrupada
-  const grupos = ['ENTRADA', 'AVALIAÇÃO', 'TÉCNICO', 'DEVOLUÇÃO'];
+  const grupos = ['ENTRADA', 'AVALIAÇÃO', 'TÉCNICO', 'PAGAMENTO', 'DEVOLUÇÃO'];
   const tblEl = document.getElementById('tbody-sla-hist');
   if (!tblEl) return;
 
@@ -1001,11 +1099,11 @@ function renderSlaReport() {
   const slaByMonth = {}; // { 'YYYY-MM': { ENTRADA: {dentro,total}, AVALIAÇÃO: ... } }
   for (const h of histEntries) {
     const month = h.createdTime?.substring(0, 7) || 'N/A';
-    if (!slaByMonth[month]) slaByMonth[month] = { ENTRADA: {d:0,t:0}, AVALIAÇÃO: {d:0,t:0}, TÉCNICO: {d:0,t:0}, DEVOLUÇÃO: {d:0,t:0} };
+    if (!slaByMonth[month]) slaByMonth[month] = { ENTRADA: {d:0,t:0}, AVALIAÇÃO: {d:0,t:0}, TÉCNICO: {d:0,t:0}, PAGAMENTO: {d:0,t:0}, DEVOLUÇÃO: {d:0,t:0} };
     for (const [status, hours] of Object.entries(h.statusTimes || {})) {
       const grupo = STATUS_GRUPOS[status];
       if (!grupo || !slaByMonth[month][grupo]) continue;
-      const dias = horasParaDiasUteis(hours);
+      const dias = horasParaDiasUteis(hours, h.createdTime);
       const slaDias = SLA_DIAS_UTEIS[status];
       slaByMonth[month][grupo].t++;
       if (!slaDias || dias <= slaDias) slaByMonth[month][grupo].d++;
@@ -1013,7 +1111,7 @@ function renderSlaReport() {
   }
 
   const months = Object.keys(slaByMonth).sort();
-  const grupoColors = { ENTRADA: C.green, AVALIAÇÃO: C.blue, TÉCNICO: C.orange, DEVOLUÇÃO: C.purple };
+  const grupoColors = { ENTRADA: C.green, AVALIAÇÃO: C.blue, TÉCNICO: C.orange, PAGAMENTO: '#e0c052', DEVOLUÇÃO: C.purple };
 
   makeChart('chart-sla-mensal', {
     type: 'bar',
@@ -1045,8 +1143,13 @@ function renderSlaReport() {
       ]
     },
     options: {
-      plugins: { legend: { position: 'bottom' } },
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        datalabels: { display: false }
+      },
       scales: {
+        x: { ticks: { maxRotation: 45, minRotation: 0 } },
         y: { beginAtZero: true, max: 105, ticks: { callback: v => v + '%' } }
       }
     }
