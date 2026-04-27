@@ -421,10 +421,8 @@ app.get('/api/desk-history', async (req, res) => {
     );
 
     const events = hist.data.data || [];
-    // Debug: retorna estrutura bruta se vazio
-    if (events.length === 0) {
-      return res.json({ ticketId, statusTimes: {}, statusChanges: [], debug: { raw: hist.data, count: 0 } });
-    }
+    // Sempre retorna raw para debug temporário
+    return res.json({ ticketId, raw: hist.data, eventsCount: events.length, firstEvent: events[0] || null });
     // Log primeiro evento para debug
     const firstEvent = events[0];
     let statusChanges = [];
@@ -469,34 +467,7 @@ app.get('/api/desk-history', async (req, res) => {
   }
 });
 
-// ─── Histórico de um ticket (para calcular lead time por status) ──────
-app.get('/api/desk-history', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId obrigatório' });
 
-    const token = await getDeskToken();
-    await delay(150);
-    const r = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-
-    const events = r.data.data || [];
-    // Filtra só eventos de mudança de status
-    const statusEvents = events.filter(e => {
-      if (!e.eventInfo) return false;
-      return e.eventInfo.some(i => i.propertyName === 'Status');
-    }).map(e => ({
-      time: e.eventTime,
-      to: e.eventInfo.find(i => i.propertyName === 'Status')?.propertyValue?.updatedValue || null
-    })).filter(e => e.to);
-
-    res.json({ ticketId, statusEvents });
-  } catch (e) {
-    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
-  }
-});
 
 // ─── Status ───────────────────────────────────────────────────────────
 app.get('/api/status', async (req, res) => {
