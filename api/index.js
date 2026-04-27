@@ -444,7 +444,7 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
     if (statusChanges.length === 0) {
-      return res.json({ ticketId, statusTimes: {}, statusChanges: [], debug: { firstEvent, totalEvents: events.length } });
+      return res.json({ ticketId, statusTimes: {}, statusChanges: [], debug: { firstEvent, totalEvents: events.length, allEvents: events.slice(0, 3) } });
     }
 
     statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
