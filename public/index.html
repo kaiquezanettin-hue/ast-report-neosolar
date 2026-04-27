@@ -594,6 +594,23 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
     </div>
   </div>
 
+  <!-- Histograma por macro status -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Histograma de Lead Time por Macro Status <span>dias úteis — período selecionado</span>
+      <span style="display:flex;gap:8px;margin-left:auto;">
+        <select id="filtro-hist-grupo" onchange="renderSlaReport()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:3px 8px;border-radius:4px;font-family:var(--font);font-size:12px;">
+          <option value="todos">Todos os grupos</option>
+          <option value="ENTRADA">Entrada</option>
+          <option value="AVALIAÇÃO">Avaliação</option>
+          <option value="PAGAMENTO">Pagamento</option>
+          <option value="TÉCNICO">Técnico</option>
+          <option value="DEVOLUÇÃO">Devolução</option>
+        </select>
+      </span>
+    </div>
+    <div style="position:relative;height:320px;width:100%;"><canvas id="chart-histograma"></canvas></div>
+  </div>
+
   <!-- Gráfico % SLA por mês -->
   <div class="panel blue">
     <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
@@ -737,7 +754,7 @@ const STATUS_GRUPOS = {
   // ENTRADA
   'Aguardando 1º contato - AST': 'ENTRADA',
   'Pendencia AST - SAC': 'ENTRADA',
-  'Aguardando Classificação': 'ENTRADA',
+
   // AVALIAÇÃO
   'Aguardando teste': 'AVALIAÇÃO',
   'Em teste': 'AVALIAÇÃO',
@@ -764,6 +781,7 @@ const STATUS_GRUPOS = {
 
 // SLA em dias úteis por status
 const SLA_DIAS_UTEIS = {
+  'Pendencia AST - SAC': 2.0,
   'Aguardando 1º contato - AST': 0.5,
   'Aguardando teste': 3.0,
   'Em teste': 0.25,
@@ -1115,6 +1133,77 @@ function renderSlaReport() {
   tblEl.innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:var(--gray2);">
     ${Object.keys(deskHistory).length === 0 ? '⏳ Carregando histórico de tickets...' : 'Sem dados para o período/filtro selecionado'}
   </td></tr>`;
+
+  // ── Histograma de lead time por macro status ──
+  const filtroHistGrupo = document.getElementById('filtro-hist-grupo')?.value || 'todos';
+  
+  // Buckets em dias úteis: 0-1, 1-2, 2-4, 4-6, 6-8, 8-10, 10-12, 12-14, 14-16, 16-18, 18-20, 20-22, 22-24, 24-26, 26-28, 28-30, 30-32, 32-34, 34-36, 36-38, 38-40, 40-48, 48-100, 100+
+  const bucketLabels = ['0-1','1-2','2-4','4-6','6-8','8-10','10-12','12-14','14-16','16-18','18-20','20-22','22-24','24-26','26-28','28-30','30-32','32-34','34-36','36-38','38-40','40-48','48-100','100+'];
+  function getBucket(dias) {
+    if (dias < 1) return 0;
+    if (dias < 2) return 1;
+    if (dias < 4) return 2;
+    if (dias < 6) return 3;
+    if (dias < 8) return 4;
+    if (dias < 10) return 5;
+    if (dias < 12) return 6;
+    if (dias < 14) return 7;
+    if (dias < 16) return 8;
+    if (dias < 18) return 9;
+    if (dias < 20) return 10;
+    if (dias < 22) return 11;
+    if (dias < 24) return 12;
+    if (dias < 26) return 13;
+    if (dias < 28) return 14;
+    if (dias < 30) return 15;
+    if (dias < 32) return 16;
+    if (dias < 34) return 17;
+    if (dias < 36) return 18;
+    if (dias < 38) return 19;
+    if (dias < 40) return 20;
+    if (dias < 48) return 21;
+    if (dias < 100) return 22;
+    return 23;
+  }
+
+  const grupos_hist = filtroHistGrupo === 'todos'
+    ? ['ENTRADA', 'AVALIAÇÃO', 'PAGAMENTO', 'TÉCNICO', 'DEVOLUÇÃO']
+    : [filtroHistGrupo];
+
+  const histData = {}; // { grupo: [count per bucket] }
+  for (const g of grupos_hist) histData[g] = new Array(bucketLabels.length).fill(0);
+
+  for (const h of histEntries) {
+    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
+      const grupo = STATUS_GRUPOS[status];
+      if (!grupo || !histData[grupo]) continue;
+      const dias = horasParaDiasUteis(hours, h.createdTime);
+      histData[grupo][getBucket(dias)]++;
+    }
+  }
+
+  const histColors = { ENTRADA: C.green, AVALIAÇÃO: C.blue, PAGAMENTO: '#e0c052', TÉCNICO: C.orange, DEVOLUÇÃO: C.purple };
+
+  makeChart('chart-histograma', {
+    type: 'bar',
+    data: {
+      labels: bucketLabels,
+      datasets: grupos_hist.map(g => ({
+        label: g,
+        data: histData[g],
+        backgroundColor: histColors[g] || C.gray,
+        borderRadius: 2
+      }))
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        x: { title: { display: true, text: 'Dias Úteis', color: C.gray2 } },
+        y: { beginAtZero: true, title: { display: true, text: 'Qtd de Tickets', color: C.gray2 } }
+      }
+    }
+  });
 
   // Gráfico % SLA por mês
   const slaByMonth = {}; // { 'YYYY-MM': { ENTRADA: {dentro,total}, AVALIAÇÃO: ... } }
