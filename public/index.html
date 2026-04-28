@@ -1620,7 +1620,8 @@ function renderProdutos(d) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
 
   // Gráfico NeoSolar — barras empilhadas por período
-  const nsTrimestres = Object.keys(trimestreData).sort((a, b) => {
+  // Gráfico NeoSolar usa trimestralRaw do backend (tem _neoSolar/_outros/_semInfo)
+  const nsTrimestres = Object.keys(trimestralRaw).sort((a, b) => {
     if (a.includes('/') && b.includes('/')) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
       return ya !== yb ? Number(ya) - Number(yb) : Number(ma) - Number(mb);
@@ -1634,9 +1635,9 @@ function renderProdutos(d) {
     data: {
       labels: nsTrimestres,
       datasets: [
-        { label: 'Comprado na NeoSolar', data: nsTrimestres.map(t => trimestreData[t]?._neoSolar || 0), backgroundColor: C.green, borderRadius: 2 },
-        { label: 'Outras origens', data: nsTrimestres.map(t => trimestreData[t]?._outros || 0), backgroundColor: C.orange, borderRadius: 2 },
-        { label: 'Não informado', data: nsTrimestres.map(t => trimestreData[t]?._semInfo || 0), backgroundColor: C.gray2, borderRadius: 2 }
+        { label: 'Comprado na NeoSolar', data: nsTrimestres.map(t => trimestralRaw[t]?._neoSolar || 0), backgroundColor: C.green, borderRadius: 2 },
+        { label: 'Outras origens', data: nsTrimestres.map(t => trimestralRaw[t]?._outros || 0), backgroundColor: C.orange, borderRadius: 2 },
+        { label: 'Não informado', data: nsTrimestres.map(t => trimestralRaw[t]?._semInfo || 0), backgroundColor: C.gray2, borderRadius: 2 }
       ]
     },
     options: {
