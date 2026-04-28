@@ -1673,7 +1673,25 @@ function renderProdutos(d) {
         x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
         y: { stacked: true, beginAtZero: true, ticks: { color: C.gray2 } }
       }
-    }
+    },
+    plugins: [{
+      id: 'stackedTotals',
+      afterDatasetsDraw(chart) {
+        const { ctx, data } = chart;
+        const nDatasets = data.datasets.length;
+        const lastMeta = chart.getDatasetMeta(nDatasets - 1);
+        lastMeta.data.forEach((bar, i) => {
+          const total = data.datasets.reduce((s, ds) => s + (ds.data[i] || 0), 0);
+          if (!total) return;
+          ctx.save();
+          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
+          ctx.fillStyle = '#FFFDF0';
+          ctx.textAlign = 'center';
+          ctx.fillText(total, bar.x, bar.y - 5);
+          ctx.restore();
+        });
+      }
+    }]
   });
 
   // Chart: serviços por período %
@@ -1687,7 +1705,25 @@ function renderProdutos(d) {
         x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
         y: { stacked: true, max: 100, ticks: { color: C.gray2, callback: v => v + '%' } }
       }
-    }
+    },
+    plugins: [{
+      id: 'stackedTotals',
+      afterDatasetsDraw(chart) {
+        const { ctx, data } = chart;
+        const nDatasets = data.datasets.length;
+        const lastMeta = chart.getDatasetMeta(nDatasets - 1);
+        lastMeta.data.forEach((bar, i) => {
+          const total = data.datasets.reduce((s, ds) => s + (ds.data[i] || 0), 0);
+          if (!total) return;
+          ctx.save();
+          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
+          ctx.fillStyle = '#FFFDF0';
+          ctx.textAlign = 'center';
+          ctx.fillText(total, bar.x, bar.y - 5);
+          ctx.restore();
+        });
+      }
+    }]
   });
 
   // Totais de garantia no período
