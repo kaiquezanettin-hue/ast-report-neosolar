@@ -427,6 +427,10 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
       <div class="panel-title">Curva ABC de Produtos <span>80% do volume</span></div>
       <div class="chart-wrap tall"><canvas id="chart-abc"></canvas></div>
     </div>
+    <div class="panel">
+      <div class="panel-title">Comprado na NeoSolar? <span>produtos em assistência</span></div>
+      <div style="position:relative;height:280px;width:100%;"><canvas id="chart-neosolar"></canvas></div>
+    </div>
   </div>
 
   <!-- Gráficos de serviço por período -->
@@ -1557,6 +1561,30 @@ function renderProdutos(d) {
       scales: {
         x: { ticks: { maxRotation: 45, font: { size: 10 } } },
         y: { beginAtZero: true }
+      }
+    }
+  });
+
+  // Gráfico NeoSolar
+  const ns = r.neoSolar || { total: 0, outros: 0, semInfo: 0 };
+  const nsTotal = ns.total + ns.outros + ns.semInfo;
+  makeChart('chart-neosolar', {
+    type: 'doughnut',
+    data: {
+      labels: [
+        `Comprado na NeoSolar (${nsTotal > 0 ? Math.round(ns.total/nsTotal*100) : 0}%)`,
+        `Outras origens (${nsTotal > 0 ? Math.round(ns.outros/nsTotal*100) : 0}%)`,
+        `Não informado (${nsTotal > 0 ? Math.round(ns.semInfo/nsTotal*100) : 0}%)`
+      ],
+      datasets: [{ data: [ns.total, ns.outros, ns.semInfo], backgroundColor: [C.green, C.orange, C.gray2], borderWidth: 2, borderColor: C.bg2 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      cutout: '60%',
+      centerText: { line1: nsTotal.toString(), line2: 'Total' },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 }, color: C.white } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}` } }
       }
     }
   });
