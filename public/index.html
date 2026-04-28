@@ -427,8 +427,8 @@ canvas { max-width: 100%; }
       <div style="position:relative;height:280px;width:100%;"><canvas id="chart-line2"></canvas></div>
     </div>
     <div class="panel">
-      <div class="panel-title">Comprado na NeoSolar? <span>por período</span></div>
-      <div style="position:relative;height:320px;width:100%;"><canvas id="chart-neosolar"></canvas></div>
+      <div class="panel-title">Local de Teste <span>por período</span></div>
+      <div style="position:relative;height:320px;width:100%;"><canvas id="chart-test-location"></canvas></div>
     </div>
   </div>
 
@@ -1623,8 +1623,8 @@ function renderProdutos(d) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
 
   // Gráfico NeoSolar — barras empilhadas por período
-  // Gráfico NeoSolar usa trimestralRaw do backend (tem _neoSolar/_outros/_semInfo)
-  const nsTrimestres = Object.keys(trimestralRaw).sort((a, b) => {
+  // Gráfico Local de Teste — barras empilhadas por período
+  const locTrimestres = Object.keys(trimestralRaw).sort((a, b) => {
     if (a.includes('/') && b.includes('/')) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
       return ya !== yb ? Number(ya) - Number(yb) : Number(ma) - Number(mb);
@@ -1633,15 +1633,22 @@ function renderProdutos(d) {
     return ya !== yb ? Number(ya) - Number(yb) : qa.localeCompare(qb);
   });
 
-  makeChart('chart-neosolar', {
+  // Coleta todos os locais únicos
+  const allLocations = [...new Set(
+    Object.values(trimestralRaw).flatMap(t => Object.keys(t._locations || {}))
+  )].sort();
+  const locCores = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red, C.gray2];
+
+  makeChart('chart-test-location', {
     type: 'bar',
     data: {
-      labels: nsTrimestres,
-      datasets: [
-        { label: 'Comprado na NeoSolar', data: nsTrimestres.map(t => trimestralRaw[t]?._neoSolar || 0), backgroundColor: C.green, borderRadius: 2 },
-        { label: 'Outras origens', data: nsTrimestres.map(t => trimestralRaw[t]?._outros || 0), backgroundColor: C.orange, borderRadius: 2 },
-        { label: 'Não informado', data: nsTrimestres.map(t => trimestralRaw[t]?._semInfo || 0), backgroundColor: C.gray2, borderRadius: 2 }
-      ]
+      labels: locTrimestres,
+      datasets: allLocations.map((loc, i) => ({
+        label: loc,
+        data: locTrimestres.map(t => trimestralRaw[t]?._locations?.[loc] || 0),
+        backgroundColor: locCores[i % locCores.length],
+        borderRadius: 2
+      }))
     },
     options: {
       maintainAspectRatio: false,
