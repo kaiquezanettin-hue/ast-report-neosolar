@@ -1597,6 +1597,7 @@ function renderProdutos(d) {
   // ── Gráficos de serviço por período (trimestral) ──
   // Usa dados calculados no backend — tem o campo service correto
   const trimestralRaw = d.rma?.trimestral || {};
+  console.log('trimestralRaw keys:', Object.keys(trimestralRaw).slice(0,3), 'sample:', JSON.stringify(Object.values(trimestralRaw)[0]));
 
   function getServicoCategoria(service) {
     const s = (service || '').trim();
@@ -1629,6 +1630,11 @@ function renderProdutos(d) {
   }
 
   const trimestres = Object.keys(trimestreData).sort((a, b) => {
+    // Suporta formato "T1 2025" (trimestre) e "01/2025" (mês)
+    if (a.includes('/') && b.includes('/')) {
+      const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
+      return ya !== yb ? ya - yb : ma - mb;
+    }
     const [qa, ya] = a.split(' '); const [qb, yb] = b.split(' ');
     return ya !== yb ? ya - yb : qa.localeCompare(qb);
   });
