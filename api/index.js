@@ -199,7 +199,8 @@ function parseRmaCsv(buffer) {
     skuComponents: r['SKU dos componentes consumidos no reparo'] || '',
     componentModel: r['Model PCB / Component'] || '',
     businessUnit: r['Business Unit'] || '',
-    addedTime: r['Added Time'] || ''
+    addedTime: r['Added Time'] || '',
+    purchasedNeoSolar: r['Product purchased from neosolar?'] || ''
   }));
 }
 
@@ -369,6 +370,15 @@ app.post('/api/report', async (req, res) => {
       }
     }
 
+    // Contagem NeoSolar (todos os registros do período)
+    let totalNeoSolar = 0, totalOutros = 0, totalSemInfo = 0;
+    for (const r of rma) {
+      const pns = (r.purchasedNeoSolar || '').toLowerCase().trim();
+      if (pns === 'yes' || pns === 'sim' || pns === 'y') totalNeoSolar++;
+      else if (pns) totalOutros++;
+      else totalSemInfo++;
+    }
+
     const topProducts = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
     const topFaults = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
     const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
@@ -376,7 +386,7 @@ app.post('/api/report', async (req, res) => {
     // rmaRaw usa TODOS os registros (sem filtro de período) para cruzamento com histórico
     const rmaAllCache = await getFromDb('rma', 'rma');
     const rmaAll = rmaAllCache.data || [];
-    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service }));
+    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, purchasedNeoSolar: r.purchasedNeoSolar }));
     // rawFull inclui todos os campos necessários para os gráficos de produto
     const rmaRawFull = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, testDate: r.testDate }));
 
@@ -439,6 +449,11 @@ app.post('/api/report', async (req, res) => {
       if (!trimestralData[periodo]) trimestralData[periodo] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
       const svc = r.service || '';
       trimestralData[periodo].services[svc] = (trimestralData[periodo].services[svc] || 0) + 1;
+      // Comprado na NeoSolar
+      const pns = (r.purchasedNeoSolar || '').toLowerCase().trim();
+      if (pns === 'yes' || pns === 'sim' || pns === 'y') trimestralData[periodo].neoSolar = (trimestralData[periodo].neoSolar || 0) + 1;
+      else if (pns) trimestralData[periodo].outros = (trimestralData[periodo].outros || 0) + 1;
+      else trimestralData[periodo].semInfo = (trimestralData[periodo].semInfo || 0) + 1;
       const v = (r.validation || '').toLowerCase();
       if (v.includes('no warranty maintenance')) trimestralData[periodo].maintenance++;
       else if (v.includes('no warranty')) trimestralData[periodo].noWarranty++;
@@ -459,7 +474,7 @@ app.post('/api/report', async (req, res) => {
         })).sort((a, b) => b.count - a.count),
         monthlyTrend
       },
-      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw, rawFull: rmaRawFull, trimestral: trimestralData },
+      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw, rawFull: rmaRawFull, trimestral: trimestralData, neoSolar: { total: totalNeoSolar, outros: totalOutros, semInfo: totalSemInfo } },
       spareParts,
       sankhya: (sankhyaCache.data || []).slice(0, 500),
       dataStatus: {
