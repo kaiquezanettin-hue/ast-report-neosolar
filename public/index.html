@@ -1675,20 +1675,25 @@ function renderProdutos(d) {
       }
     },
     plugins: [{
-      id: 'stackedTotals',
+      id: 'segmentLabels',
       afterDatasetsDraw(chart) {
         const { ctx, data } = chart;
-        const nDatasets = data.datasets.length;
-        const lastMeta = chart.getDatasetMeta(nDatasets - 1);
-        lastMeta.data.forEach((bar, i) => {
-          const total = data.datasets.reduce((s, ds) => s + (ds.data[i] || 0), 0);
-          if (!total) return;
-          ctx.save();
-          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
-          ctx.fillStyle = '#FFFDF0';
-          ctx.textAlign = 'center';
-          ctx.fillText(total, bar.x, bar.y - 5);
-          ctx.restore();
+        data.datasets.forEach((ds, di) => {
+          const meta = chart.getDatasetMeta(di);
+          meta.data.forEach((bar, i) => {
+            const val = ds.data[i];
+            if (!val || val < 3) return; // não mostra se muito pequeno
+            const barHeight = Math.abs(bar.base - bar.y);
+            if (barHeight < 14) return; // não mostra se barra muito pequena
+            const y = bar.y + barHeight / 2;
+            ctx.save();
+            ctx.font = 'bold 10px Barlow Condensed, sans-serif';
+            ctx.fillStyle = '#1c1e20';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(val, bar.x, y);
+            ctx.restore();
+          });
         });
       }
     }]
@@ -1707,20 +1712,40 @@ function renderProdutos(d) {
       }
     },
     plugins: [{
-      id: 'stackedTotals',
+      id: 'segmentLabels',
       afterDatasetsDraw(chart) {
         const { ctx, data } = chart;
-        const nDatasets = data.datasets.length;
-        const lastMeta = chart.getDatasetMeta(nDatasets - 1);
-        lastMeta.data.forEach((bar, i) => {
-          const total = data.datasets.reduce((s, ds) => s + (ds.data[i] || 0), 0);
-          if (!total) return;
-          ctx.save();
-          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
-          ctx.fillStyle = '#FFFDF0';
-          ctx.textAlign = 'center';
-          ctx.fillText(total, bar.x, bar.y - 5);
-          ctx.restore();
+        data.datasets.forEach((ds, di) => {
+          const meta = chart.getDatasetMeta(di);
+          meta.data.forEach((bar, i) => {
+            const val = ds.data[i];
+            if (!val || val < 5) return;
+            const barHeight = Math.abs(bar.base - bar.y);
+            if (barHeight < 14) return;
+            const y = bar.y + barHeight / 2;
+            ctx.save();
+            ctx.font = 'bold 10px Barlow Condensed, sans-serif';
+            ctx.fillStyle = '#1c1e20';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(val + '%', bar.x, y);
+            ctx.restore();
+          });
+        });
+      }
+    }]];
+            if (!val || val < 3) return; // não mostra se muito pequeno
+            const barHeight = Math.abs(bar.base - bar.y);
+            if (barHeight < 14) return; // não mostra se barra muito pequena
+            const y = bar.y + barHeight / 2;
+            ctx.save();
+            ctx.font = 'bold 10px Barlow Condensed, sans-serif';
+            ctx.fillStyle = '#1c1e20';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(val, bar.x, y);
+            ctx.restore();
+          });
         });
       }
     }]
@@ -1828,21 +1853,25 @@ function renderProdutos(d) {
       }
     },
     plugins: [{
-      id: 'totalAbove',
+      id: 'segmentLabels',
       afterDatasetsDraw(chart) {
-        const { ctx } = chart;
-        const nDatasets = chart.data.datasets.length;
-        const lastMeta = chart.getDatasetMeta(nDatasets - 1);
-        lastMeta.data.forEach((bar, i) => {
-          const t = chart.data.labels[i];
-          const total = (garantiaTrimestre[t]?.warranty||0) + (garantiaTrimestre[t]?.noWarranty||0) + (garantiaTrimestre[t]?.maintenance||0);
-          if (!total) return;
-          ctx.save();
-          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
-          ctx.fillStyle = '#FFFDF0';
-          ctx.textAlign = 'center';
-          ctx.fillText(total, bar.x, bar.y - 5);
-          ctx.restore();
+        const { ctx, data } = chart;
+        data.datasets.forEach((ds, di) => {
+          const meta = chart.getDatasetMeta(di);
+          meta.data.forEach((bar, i) => {
+            const val = ds.data[i];
+            if (!val || val < 3) return; // não mostra se muito pequeno
+            const barHeight = Math.abs(bar.base - bar.y);
+            if (barHeight < 14) return; // não mostra se barra muito pequena
+            const y = bar.y + barHeight / 2;
+            ctx.save();
+            ctx.font = 'bold 10px Barlow Condensed, sans-serif';
+            ctx.fillStyle = '#1c1e20';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(val, bar.x, y);
+            ctx.restore();
+          });
         });
       }
     }]
