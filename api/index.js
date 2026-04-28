@@ -399,20 +399,38 @@ app.post('/api/report', async (req, res) => {
       return null;
     }
 
-    const trimestralData = {}; // { 'T1 2025': { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 } }
-    for (const r of rmaAll) {
-      const trim = getTrimestre(r.addedTime);
-      if (!trim) continue;
-      if (!trimestralData[trim]) trimestralData[trim] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
-      const svc = r.service || '';
-      trimestralData[trim].services[svc] = (trimestralData[trim].services[svc] || 0) + 1;
-      const v = (r.validation || '').toLowerCase();
-      if (v.includes('no warranty maintenance')) trimestralData[trim].maintenance++;
-      else if (v.includes('no warranty')) trimestralData[trim].noWarranty++;
-      else if (v.includes('warranty')) trimestralData[trim].warranty++;
+    // Agrupamento dinâmico: mês para períodos curtos, trimestre para longos
+    const diffDias = (toDate - fromDate) / (1000 * 60 * 60 * 24);
+    const usarMes = diffDias <= 92;
+
+    function getPeriodo(dateStr) {
+      const trim = getTrimestre(dateStr);
+      if (!trim) return null;
+      if (usarMes) {
+        // Extrai mês/ano do addedTime
+        const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+        const months = { Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12' };
+        if (m) return `${months[m[2]]}/${m[3]}`;
+        const d2 = new Date(dateStr);
+        if (!isNaN(d2)) return `${String(d2.getMonth()+1).padStart(2,'0')}/${d2.getFullYear()}`;
+        return null;
+      }
+      return trim;
     }
-    // rawFull inclui service para gráficos de período (limita a 2000 registros para não estourar payload)
-    const rmaRawFull = rmaAll.slice(0, 2000).map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service }));
+
+    const trimestralData = {};
+    for (const r of rmaAll) {
+      const periodo = getPeriodo(r.addedTime);
+      if (!periodo) continue;
+      if (!trimestralData[periodo]) trimestralData[periodo] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
+      const svc = r.service || '';
+      trimestralData[periodo].services[svc] = (trimestralData[periodo].services[svc] || 0) + 1;
+      const v = (r.validation || '').toLowerCase();
+      if (v.includes('no warranty maintenance')) trimestralData[periodo].maintenance++;
+      else if (v.includes('no warranty')) trimestralData[periodo].noWarranty++;
+      else if (v.includes('warranty')) trimestralData[periodo].warranty++;
+    }
+
 
     res.json({
       updatedAt: new Date().toISOString(),
