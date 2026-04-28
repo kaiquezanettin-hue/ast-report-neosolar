@@ -376,7 +376,43 @@ app.post('/api/report', async (req, res) => {
     // rmaRaw usa TODOS os registros (sem filtro de período) para cruzamento com histórico
     const rmaAllCache = await getFromDb('rma', 'rma');
     const rmaAll = rmaAllCache.data || [];
-    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime }));
+    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service }));
+    // rawFull inclui todos os campos necessários para os gráficos de produto
+    const rmaRawFull = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, testDate: r.testDate }));
+
+    // Dados trimestrais por serviço e garantia (usa addedTime, todos os registros)
+    function getTrimestre(dateStr) {
+      if (!dateStr) return null;
+      // Formato: "24-Apr-2026 12:04:10"
+      const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
+      const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+      if (m) {
+        const d = new Date(parseInt(m[3]), months[m[2]], parseInt(m[1]));
+        const q = Math.ceil((d.getMonth() + 1) / 3);
+        return `T${q} ${d.getFullYear()}`;
+      }
+      const d2 = new Date(dateStr);
+      if (!isNaN(d2)) {
+        const q = Math.ceil((d2.getMonth() + 1) / 3);
+        return `T${q} ${d2.getFullYear()}`;
+      }
+      return null;
+    }
+
+    const trimestralData = {}; // { 'T1 2025': { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 } }
+    for (const r of rmaAll) {
+      const trim = getTrimestre(r.addedTime);
+      if (!trim) continue;
+      if (!trimestralData[trim]) trimestralData[trim] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
+      const svc = r.service || '';
+      trimestralData[trim].services[svc] = (trimestralData[trim].services[svc] || 0) + 1;
+      const v = (r.validation || '').toLowerCase();
+      if (v.includes('no warranty maintenance')) trimestralData[trim].maintenance++;
+      else if (v.includes('no warranty')) trimestralData[trim].noWarranty++;
+      else if (v.includes('warranty')) trimestralData[trim].warranty++;
+    }
+    // rawFull inclui service para gráficos de período (limita a 2000 registros para não estourar payload)
+    const rmaRawFull = rmaAll.slice(0, 2000).map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service }));
 
     res.json({
       updatedAt: new Date().toISOString(),
@@ -391,7 +427,7 @@ app.post('/api/report', async (req, res) => {
         })).sort((a, b) => b.count - a.count),
         monthlyTrend
       },
-      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw },
+      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw, rawFull: rmaRawFull, trimestral: trimestralData },
       spareParts,
       sankhya: (sankhyaCache.data || []).slice(0, 500),
       dataStatus: {
