@@ -424,12 +424,8 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
       <div style="position:relative;height:280px;width:100%;"><canvas id="chart-line2"></canvas></div>
     </div>
     <div class="panel">
-      <div class="panel-title">Curva ABC de Produtos <span>80% do volume</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-abc"></canvas></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">Comprado na NeoSolar? <span>produtos em assistência</span></div>
-      <div style="position:relative;height:280px;width:100%;"><canvas id="chart-neosolar"></canvas></div>
+      <div class="panel-title">Comprado na NeoSolar? <span>por período</span></div>
+      <div style="position:relative;height:320px;width:100%;"><canvas id="chart-neosolar"></canvas></div>
     </div>
   </div>
 
@@ -1565,52 +1561,54 @@ function renderProdutos(d) {
     }
   });
 
-  // Gráfico NeoSolar
-  const ns = r.neoSolar || { total: 0, outros: 0, semInfo: 0 };
-  const nsTotal = ns.total + ns.outros + ns.semInfo;
-  makeChart('chart-neosolar', {
-    type: 'doughnut',
-    data: {
-      labels: [
-        `Comprado na NeoSolar (${nsTotal > 0 ? Math.round(ns.total/nsTotal*100) : 0}%)`,
-        `Outras origens (${nsTotal > 0 ? Math.round(ns.outros/nsTotal*100) : 0}%)`,
-        `Não informado (${nsTotal > 0 ? Math.round(ns.semInfo/nsTotal*100) : 0}%)`
-      ],
-      datasets: [{ data: [ns.total, ns.outros, ns.semInfo], backgroundColor: [C.green, C.orange, C.gray2], borderWidth: 2, borderColor: C.bg2 }]
-    },
-    options: {
-      maintainAspectRatio: false,
-      cutout: '60%',
-      centerText: { line1: nsTotal.toString(), line2: 'Total' },
-      plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 }, color: C.white } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}` } }
-      }
+  // Gráfico NeoSolar — barras empilhadas por período
+  const nsTrimestres = Object.keys(trimestreData).sort((a, b) => {
+    if (a.includes('/') && b.includes('/')) {
+      const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
+      return ya !== yb ? Number(ya) - Number(yb) : Number(ma) - Number(mb);
     }
+    const [qa, ya] = a.split(' '); const [qb, yb] = b.split(' ');
+    return ya !== yb ? Number(ya) - Number(yb) : qa.localeCompare(qb);
   });
 
-  // Curva ABC
-  const sorted = [...r.topProducts].sort((a, b) => b.count - a.count);
-  const total = sorted.reduce((s, p) => s + p.count, 0);
-  let cum = 0;
-  const cumPct = sorted.map(p => { cum += p.count; return Math.round(cum/total*100); });
-  makeChart('chart-abc', {
+  makeChart('chart-neosolar', {
     type: 'bar',
     data: {
-      labels: sorted.map(p => p.model),
+      labels: nsTrimestres,
       datasets: [
-        { label: 'Qtd', data: sorted.map(p => p.count), backgroundColor: C.yellow, borderRadius: 4, yAxisID: 'y' },
-        { label: '% Acumulado', data: cumPct, type: 'line', borderColor: C.red, backgroundColor: 'transparent', pointRadius: 4, tension: 0.3, yAxisID: 'y1' }
+        { label: 'Comprado na NeoSolar', data: nsTrimestres.map(t => trimestreData[t]?._neoSolar || 0), backgroundColor: C.green, borderRadius: 2 },
+        { label: 'Outras origens', data: nsTrimestres.map(t => trimestreData[t]?._outros || 0), backgroundColor: C.orange, borderRadius: 2 },
+        { label: 'Não informado', data: nsTrimestres.map(t => trimestreData[t]?._semInfo || 0), backgroundColor: C.gray2, borderRadius: 2 }
       ]
     },
     options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white } } },
       scales: {
-        y: { beginAtZero: true, position: 'left' },
-        y1: { beginAtZero: true, max: 100, position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: v => v + '%' } }
-      },
-      plugins: { legend: { position: 'bottom' } }
-    }
+        x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
+        y: { stacked: true, beginAtZero: true, ticks: { color: C.gray2 } }
+      }
+    },
+    plugins: [{
+      id: 'nsTotals',
+      afterDatasetsDraw(chart) {
+        const { ctx, data } = chart;
+        const lastMeta = chart.getDatasetMeta(data.datasets.length - 1);
+        lastMeta.data.forEach((bar, i) => {
+          const total = data.datasets.reduce((s, ds) => s + (ds.data[i] || 0), 0);
+          if (!total) return;
+          ctx.save();
+          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
+          ctx.fillStyle = '#FFFDF0';
+          ctx.textAlign = 'center';
+          ctx.fillText(total, bar.x, bar.y - 5);
+          ctx.restore();
+        });
+      }
+    }]
   });
+
+
 
   // RMA table
   // get raw rma from last fetch - show all filtered
