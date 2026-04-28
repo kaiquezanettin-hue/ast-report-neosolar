@@ -399,6 +399,16 @@ app.post('/api/report', async (req, res) => {
       return null;
     }
 
+    // Parser de addedTime formato "24-Apr-2026 12:04:10"
+    function parseAddedTime(dateStr) {
+      if (!dateStr) return null;
+      const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
+      const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+      if (m) return new Date(parseInt(m[3]), months[m[2]], parseInt(m[1]));
+      const d = new Date(dateStr);
+      return isNaN(d) ? null : d;
+    }
+
     // Agrupamento dinâmico: mês para períodos curtos, trimestre para longos
     const diffDias = (toDate - fromDate) / (1000 * 60 * 60 * 24);
     const usarMes = diffDias <= 92;
@@ -418,8 +428,12 @@ app.post('/api/report', async (req, res) => {
       return trim;
     }
 
+    // trimestralData respeita o filtro from/to selecionado
     const trimestralData = {};
     for (const r of rmaAll) {
+      // Filtra pelo período selecionado usando addedTime
+      const rDate = parseAddedTime(r.addedTime);
+      if (!rDate || rDate < fromDate || rDate > toDate) continue;
       const periodo = getPeriodo(r.addedTime);
       if (!periodo) continue;
       if (!trimestralData[periodo]) trimestralData[periodo] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
