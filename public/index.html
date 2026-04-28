@@ -421,7 +421,7 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
   <div class="grid2">
     <div class="panel blue">
       <div class="panel-title">Entradas por Linha de Produto</div>
-      <div class="chart-wrap"><canvas id="chart-line2"></canvas></div>
+      <div style="position:relative;height:280px;width:100%;"><canvas id="chart-line2"></canvas></div>
     </div>
     <div class="panel">
       <div class="panel-title">Curva ABC de Produtos <span>80% do volume</span></div>
@@ -445,7 +445,8 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
   <div class="grid2" style="margin-bottom:16px;">
     <div class="panel">
       <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
-      <div class="chart-wrap"><canvas id="chart-garantia-donut"></canvas></div>
+      <div style="position:relative;height:300px;width:100%;"><canvas id="chart-garantia-donut"></canvas></div>
+      <div id="donut-garantia-legenda" style="text-align:center;margin-top:10px;"></div>
     </div>
     <div class="panel">
       <div class="panel-title">Total de Chamados por Período <span>por tipo de garantia</span></div>
@@ -1550,7 +1551,14 @@ function renderProdutos(d) {
       labels: lines.map(l => l[0]),
       datasets: [{ label: 'Atendimentos', data: lines.map(l => l[1]), backgroundColor: palette(lines.length), borderRadius: 4 }]
     },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxRotation: 45, font: { size: 10 } } },
+        y: { beginAtZero: true }
+      }
+    }
   });
 
   // Curva ABC
@@ -1702,14 +1710,56 @@ function renderProdutos(d) {
     },
     options: {
       maintainAspectRatio: false,
-      cutout: '65%',
+      cutout: '60%',
       centerText: { line1: totalG.toString(), line2: 'Total de Chamados' },
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white, font: { size: 12 } } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}` } }
+        legend: { display: false },
+        tooltip: { enabled: false }
       }
-    }
+    },
+    plugins: [{
+      id: 'donutLabels',
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        const dataset = chart.data.datasets[0];
+        const total = dataset.data.reduce((a, b) => a + b, 0);
+        chart.getDatasetMeta(0).data.forEach((arc, i) => {
+          const val = dataset.data[i];
+          if (!val || val/total < 0.05) return;
+          const angle = (arc.startAngle + arc.endAngle) / 2;
+          const r = (arc.innerRadius + arc.outerRadius) / 2;
+          const x = arc.x + Math.cos(angle) * r;
+          const y = arc.y + Math.sin(angle) * r;
+          const pct = Math.round(val / total * 100);
+          ctx.save();
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = 'bold 13px Barlow Condensed, sans-serif';
+          ctx.fillStyle = '#1c1e20';
+          ctx.fillText(pct + '%', x, y - 7);
+          ctx.font = '10px Barlow, sans-serif';
+          ctx.fillText(val, x, y + 7);
+          ctx.restore();
+        });
+      }
+    }]
   });
+
+  // Legenda manual do donut
+  const legendEl = document.getElementById('donut-garantia-legenda');
+  if (legendEl) {
+    const labels = [
+      { label: 'Garantia', val: totalW, pct: Math.round(totalW/totalG*100)||0, color: C.yellow },
+      { label: 'Sem Garantia', val: totalNW, pct: Math.round(totalNW/totalG*100)||0, color: C.green },
+      { label: 'Manutenção Paga', val: totalM, pct: Math.round(totalM/totalG*100)||0, color: C.orange }
+    ];
+    legendEl.innerHTML = labels.map(l =>
+      `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 10px;">
+        <span style="width:10px;height:10px;border-radius:2px;background:${l.color};display:inline-block;"></span>
+        <span style="font-size:11px;color:var(--gray2);">${l.label} (${l.pct}% — ${l.val})</span>
+      </span>`
+    ).join('');
+  }
 
   makeChart('chart-garantia-periodo', {
     type: 'bar',
