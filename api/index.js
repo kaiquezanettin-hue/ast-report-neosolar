@@ -341,7 +341,7 @@ app.post('/api/report', async (req, res) => {
       const modelKey = r.model || 'Desconhecido';
       if (!productCount[modelKey]) productCount[modelKey] = { count: 0, sku: r.sku, fornecedor: r.fornecedor };
       productCount[modelKey].count++;
-      const faultCat = r.fault.split(' - ')[0] || r.fault;
+      const faultCat = r.fault || 'Desconhecido';
       faultCount[faultCat] = (faultCount[faultCat] || 0) + 1;
       lineCount[r.fornecedor] = (lineCount[r.fornecedor] || 0) + 1;
       serviceCount[r.service] = (serviceCount[r.service] || 0) + 1;
