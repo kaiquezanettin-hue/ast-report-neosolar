@@ -451,9 +451,9 @@ app.post('/api/report', async (req, res) => {
       trimestralData[periodo].services[svc] = (trimestralData[periodo].services[svc] || 0) + 1;
       // Comprado na NeoSolar
       const pns = (r.purchasedNeoSolar || '').toLowerCase().trim();
-      if (pns === 'yes' || pns === 'sim' || pns === 'y') trimestralData[periodo].neoSolar = (trimestralData[periodo].neoSolar || 0) + 1;
-      else if (pns) trimestralData[periodo].outros = (trimestralData[periodo].outros || 0) + 1;
-      else trimestralData[periodo].semInfo = (trimestralData[periodo].semInfo || 0) + 1;
+      if (pns === 'yes' || pns === 'sim' || pns === 'y') trimestralData[periodo]._neoSolar = (trimestralData[periodo]._neoSolar || 0) + 1;
+      else if (pns) trimestralData[periodo]._outros = (trimestralData[periodo]._outros || 0) + 1;
+      else trimestralData[periodo]._semInfo = (trimestralData[periodo]._semInfo || 0) + 1;
       const v = (r.validation || '').toLowerCase();
       if (v.includes('no warranty maintenance')) trimestralData[periodo].maintenance++;
       else if (v.includes('no warranty')) trimestralData[periodo].noWarranty++;
