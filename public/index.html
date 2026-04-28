@@ -1528,7 +1528,7 @@ function renderProdutos(d) {
   const maxP = r.topProducts[0]?.count || 1;
   document.getElementById('top-products-list').innerHTML = r.topProducts.map(p => `
     <div class="hbar-item">
-      <div class="label"><span>${p.model.split(' - ')[0]}</span><strong>${p.count}</strong></div>
+      <div class="label"><span style="font-size:11px;">${p.model}</span><strong>${p.count}</strong></div>
       <div class="hbar-track"><div class="hbar-fill" style="width:${p.count/maxP*100}%"></div></div>
     </div>
   `).join('') || '<div class="empty"><div class="icon">📭</div><p>Sem dados RMA no período</p></div>';
@@ -1561,7 +1561,7 @@ function renderProdutos(d) {
   makeChart('chart-abc', {
     type: 'bar',
     data: {
-      labels: sorted.map(p => p.model.split(' - ')[0]),
+      labels: sorted.map(p => p.model),
       datasets: [
         { label: 'Qtd', data: sorted.map(p => p.count), backgroundColor: C.yellow, borderRadius: 4, yAxisID: 'y' },
         { label: '% Acumulado', data: cumPct, type: 'line', borderColor: C.red, backgroundColor: 'transparent', pointRadius: 4, tension: 0.3, yAxisID: 'y1' }
@@ -1585,7 +1585,7 @@ function renderProdutos(d) {
     else if (vLow.includes('no warranty')) { cls = 'no-warranty'; lbl = 'Sem Garantia'; }
     return `<tr>
       <td>${r.fornecedor}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.model}">${r.model.split(' - ')[0]}</td>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.model}">${r.model}</td>
       <td>${r.sku}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.fault}">${r.fault}</td>
       <td>${r.testDate}</td>
