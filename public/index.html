@@ -606,7 +606,7 @@ canvas { max-width: 100%; }
 
   <!-- Tabela de lead time por status -->
   <div class="panel yellow" style="margin-bottom:16px;">
-    <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span></div>
+    <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span><span style="margin-left:auto;color:var(--yellow);font-size:11px;cursor:pointer;font-weight:600;" onclick="abrirValidacao()">↗ VER DETALHES POR TICKET</span></div>
     <div style="overflow-x:auto;">
       <table class="tbl" id="tbl-sla-hist" style="width:100%;">
         <thead><tr>
@@ -620,6 +620,34 @@ canvas { max-width: 100%; }
         <tbody id="tbody-sla-hist">
           <tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguardando carregamento do histórico de tickets...</td></tr>
         </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tabela de validação por ticket -->
+  <div class="panel" style="margin-bottom:16px;" id="painel-validacao" style="display:none;">
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+      Detalhes por Ticket — Validação
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="validacao-status" onchange="renderValidacaoTabela()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:3px 8px;border-radius:4px;font-family:var(--font);font-size:12px;">
+          <option value="">Todos os status</option>
+        </select>
+        <button onclick="document.getElementById('painel-validacao').style.display='none'" style="background:var(--bg3);border:1px solid var(--border);color:var(--gray2);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px;">Fechar</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+      <table class="tbl" id="tbl-validacao" style="width:100%;font-size:11px;">
+        <thead><tr>
+          <th>Ticket #</th>
+          <th>Status</th>
+          <th>Macro</th>
+          <th class="num">Horas Brutas</th>
+          <th class="num">Dias Úteis</th>
+          <th class="num">SLA (du)</th>
+          <th class="num">Resultado</th>
+          <th>Criado em</th>
+        </tr></thead>
+        <tbody id="tbody-validacao"></tbody>
       </table>
     </div>
   </div>
@@ -1897,6 +1925,71 @@ function renderProdutos(d) {
       }
     }]
   });
+}
+
+// ─── VALIDAÇÃO SLA ───────────────────────────────────────────────────
+function abrirValidacao() {
+  const painel = document.getElementById('painel-validacao');
+  painel.style.display = 'block';
+  painel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Popula select de status
+  const sel = document.getElementById('validacao-status');
+  const statusList = [...new Set(
+    Object.values(deskHistory).flatMap(h => Object.keys(h.statusTimes || {}))
+  )].sort();
+  sel.innerHTML = '<option value="">Todos os status</option>' +
+    statusList.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  renderValidacaoTabela();
+}
+
+function renderValidacaoTabela() {
+  const filtroStatus = document.getElementById('validacao-status')?.value || '';
+  const from = new Date(document.getElementById('date-from').value);
+  const to = new Date(document.getElementById('date-to').value);
+  to.setHours(23,59,59);
+
+  const rows = [];
+
+  for (const h of Object.values(deskHistory)) {
+    const d = new Date(h.createdTime);
+    if (d < from || d > to) continue;
+
+    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
+      if (filtroStatus && status !== filtroStatus) continue;
+      const grupo = STATUS_GRUPOS[status] || '—';
+      const dias = horasParaDiasUteis(hours, h.createdTime);
+      const slaDias = SLA_DIAS_UTEIS[status] || null;
+      const dentroSla = !slaDias || dias <= slaDias;
+      rows.push({ ticket: h.ticketNumber, status, grupo, hours, dias, slaDias, dentroSla, createdTime: h.createdTime });
+    }
+  }
+
+  // Ordena por ticket
+  rows.sort((a, b) => Number(b.ticket) - Number(a.ticket));
+
+  const tbody = document.getElementById('tbody-validacao');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray2);padding:20px;">Nenhum dado encontrado</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.slice(0, 500).map(r => {
+    const cor = r.dentroSla ? 'var(--green)' : 'var(--red)';
+    const resultado = r.dentroSla ? '✓ OK' : '✗ Vencido';
+    const dataStr = r.createdTime ? new Date(r.createdTime).toLocaleDateString('pt-BR') : '—';
+    return `<tr>
+      <td><strong>#${r.ticket}</strong></td>
+      <td>${r.status}</td>
+      <td style="color:var(--yellow);font-weight:600;">${r.grupo}</td>
+      <td class="num">${r.hours.toFixed(1)}h</td>
+      <td class="num">${r.dias.toFixed(2)}</td>
+      <td class="num">${r.slaDias ?? '—'}</td>
+      <td class="num" style="color:${cor};font-weight:600;">${resultado}</td>
+      <td>${dataStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ─── OPERAÇÃO ────────────────────────────────────────────────────────
