@@ -1669,6 +1669,7 @@ function renderProdutos(d) {
 
   // Coleta todos os locais únicos
   const allLocations = [...new Set(
+  console.log('allLocations:', allLocations, 'locTrimestres:', locTrimestres, 'sample _loc:', JSON.stringify(Object.values(trimestralRaw)[0]?._locations));
     Object.values(trimestralRaw).flatMap(t => Object.keys(t._locations || {}))
   )].sort();
   const locCores = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red, C.gray2];
