@@ -1650,6 +1650,11 @@ function renderProdutos(d) {
 
   // Gráfico NeoSolar — barras empilhadas por período
   // Gráfico Local de Teste — barras empilhadas por período
+  console.log('testLocation debug:', {
+    trimestralRawKeys: Object.keys(trimestralRaw).length,
+    sample: JSON.stringify(Object.values(trimestralRaw)[0]?._locations),
+    canvasExists: !!document.getElementById('chart-test-location')
+  });
   const locTrimestres = Object.keys(trimestralRaw).sort((a, b) => {
     if (a.includes('/') && b.includes('/')) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
