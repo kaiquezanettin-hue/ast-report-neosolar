@@ -888,7 +888,7 @@ const SLA_DIAS_UTEIS = {
   'Aguardando coleta': 1.0
 };
 
-// ─── Cálculo de dias úteis reais ─────────────────────────────────────
+// ─── Cálculo de horas úteis reais (09h–18h, seg–sex, sem feriados) ──
 
 // Páscoa (algoritmo de Meeus/Jones/Butcher)
 function calcPascoa(ano) {
@@ -907,83 +907,81 @@ function getFeriadosBR(ano) {
   const pascoa = calcPascoa(ano);
   const addDias = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-
-  const feriados = new Set([
-    // Fixos
-    `${ano}-01-01`, // Ano Novo
-    `${ano}-04-21`, // Tiradentes
-    `${ano}-05-01`, // Dia do Trabalho
-    `${ano}-09-07`, // Independência
-    `${ano}-10-12`, // Nossa Sra Aparecida
-    `${ano}-11-02`, // Finados
-    `${ano}-11-15`, // Proclamação da República
-    `${ano}-12-25`, // Natal
-    // Móveis baseados na Páscoa
-    fmt(addDias(pascoa, -48)), // Carnaval (2a)
-    fmt(addDias(pascoa, -47)), // Carnaval (3a)
-    fmt(addDias(pascoa, -2)),  // Sexta-feira Santa
-    fmt(pascoa),               // Páscoa
-    fmt(addDias(pascoa, 60)),  // Corpus Christi
+  return new Set([
+    `${ano}-01-01`, `${ano}-04-21`, `${ano}-05-01`, `${ano}-09-07`,
+    `${ano}-10-12`, `${ano}-11-02`, `${ano}-11-15`, `${ano}-12-25`,
+    fmt(addDias(pascoa, -48)), fmt(addDias(pascoa, -47)),
+    fmt(addDias(pascoa, -2)), fmt(pascoa), fmt(addDias(pascoa, 60)),
   ]);
-  return feriados;
 }
 
-// Cache de feriados por ano
 const _feriadosCache = {};
 function getFeriados(ano) {
   if (!_feriadosCache[ano]) _feriadosCache[ano] = getFeriadosBR(ano);
   return _feriadosCache[ano];
 }
 
-// Calcula dias úteis entre duas datas (considerando 8h/dia útil)
-function diasUteisEntre(inicio, fim) {
-  if (!inicio || !fim || fim <= inicio) return 0;
-  let total = 0;
-  const cur = new Date(inicio);
-  // Trabalha em incrementos de 1 hora para precisão
-  const horas = (fim - inicio) / 3600000;
-  if (horas <= 0) return 0;
+const HORA_INICIO = 9;   // 09h
+const HORA_FIM = 18;     // 18h
+const HORAS_DIA_UTIL = HORA_FIM - HORA_INICIO; // 9h por dia
 
-  // Para períodos curtos (< 30 dias), conta hora a hora
-  if (horas <= 720) {
-    let horasUteis = 0;
-    const d = new Date(inicio);
-    while (d < fim) {
-      const dow = d.getDay();
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      const feriados = getFeriados(d.getFullYear());
-      if (dow !== 0 && dow !== 6 && !feriados.has(dateStr)) {
-        horasUteis++;
-      }
-      d.setTime(d.getTime() + 3600000);
-    }
-    return horasUteis / 8;
-  }
-
-  // Para períodos longos, conta dia a dia
-  let diasUteis = 0;
-  const dataFim = new Date(fim);
-  dataFim.setHours(0,0,0,0);
-  const dataInicio = new Date(inicio);
-  dataInicio.setHours(0,0,0,0);
-
-  const d2 = new Date(dataInicio);
-  while (d2 < dataFim) {
-    const dow = d2.getDay();
-    const dateStr = `${d2.getFullYear()}-${String(d2.getMonth()+1).padStart(2,'0')}-${String(d2.getDate()).padStart(2,'0')}`;
-    const feriados = getFeriados(d2.getFullYear());
-    if (dow !== 0 && dow !== 6 && !feriados.has(dateStr)) diasUteis++;
-    d2.setDate(d2.getDate() + 1);
-  }
-  return diasUteis;
+function isDiaUtil(date) {
+  const dow = date.getDay();
+  if (dow === 0 || dow === 6) return false;
+  const dateStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  return !getFeriados(date.getFullYear()).has(dateStr);
 }
 
-// Converte horas corridas para dias úteis reais
+// Calcula horas úteis entre dois momentos (minuto a minuto seria pesado — usa lógica por dia)
+function horasUteisEntre(inicio, fim) {
+  if (!inicio || !fim || fim <= inicio) return 0;
+
+  let total = 0;
+  const cur = new Date(inicio);
+
+  // Avança para início do dia atual
+  while (cur < fim) {
+    const diaAtual = new Date(cur);
+    diaAtual.setHours(0, 0, 0, 0);
+
+    if (!isDiaUtil(cur)) {
+      // Pula para próximo dia
+      cur.setDate(cur.getDate() + 1);
+      cur.setHours(0, 0, 0, 0);
+      continue;
+    }
+
+    // Início do expediente desse dia
+    const expInicio = new Date(diaAtual);
+    expInicio.setHours(HORA_INICIO, 0, 0, 0);
+
+    // Fim do expediente desse dia
+    const expFim = new Date(diaAtual);
+    expFim.setHours(HORA_FIM, 0, 0, 0);
+
+    // Interseção entre [cur, fim] e [expInicio, expFim]
+    const segInicio = Math.max(cur.getTime(), expInicio.getTime());
+    const segFim = Math.min(fim.getTime(), expFim.getTime());
+
+    if (segFim > segInicio) {
+      total += (segFim - segInicio) / 3600000;
+    }
+
+    // Avança para próximo dia
+    cur.setDate(cur.getDate() + 1);
+    cur.setHours(0, 0, 0, 0);
+  }
+
+  return total;
+}
+
+// Retorna dias úteis (1 dia = 9h úteis)
 function horasParaDiasUteis(horas, startTime) {
-  if (!startTime || horas <= 0) return horas / 8; // fallback simples
+  if (!startTime || horas <= 0) return 0;
   const inicio = new Date(startTime);
   const fim = new Date(inicio.getTime() + horas * 3600000);
-  return diasUteisEntre(inicio, fim);
+  const horasUteis = horasUteisEntre(inicio, fim);
+  return horasUteis / HORAS_DIA_UTIL;
 }
 
 // Status ignorados no histórico e no cálculo de SLA
