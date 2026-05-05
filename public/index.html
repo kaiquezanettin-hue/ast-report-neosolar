@@ -777,6 +777,9 @@ function switchTab(id) {
   if (id === 'sla' && typeof renderSlaReport === 'function') {
     setTimeout(() => renderSlaReport(), 80);
   }
+  if (id === 'operacao' && window._lastReportData) {
+    setTimeout(() => renderOperacao(window._lastReportData), 80);
+  }
 }
 
 // ─── Chart helpers ───────────────────────────────────────────────────
@@ -1070,9 +1073,12 @@ async function fetchDeskHistory(tickets) {
       }
     } catch {}
     processed++;
-    if (processed % 5 === 0) {
+    if (processed % 10 === 0) {
       document.getElementById('last-update').textContent = `⏳ Histórico: ${processed}/${totalParaBuscar} tickets...`;
       renderSlaReport();
+      if (document.getElementById('tab-operacao')?.classList.contains('active') && window._lastReportData) {
+        renderOperacao(window._lastReportData);
+      }
     }
   }
 
@@ -1105,6 +1111,10 @@ async function fetchDeskHistory(tickets) {
   historyLoaded = true;
   document.getElementById('last-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
   renderSlaReport();
+  // Re-renderiza operação se estiver ativa
+  if (document.getElementById('tab-operacao')?.classList.contains('active') && window._lastReportData) {
+    renderOperacao(window._lastReportData);
+  }
 }
 
 // Renderiza tabela e gráfico de SLA com base no histórico
@@ -2061,6 +2071,12 @@ function renderOperacao(d) {
   }
 
   ticketsCusto.sort((a, b) => b.custo - a.custo);
+  console.log('Custo debug:', {
+    totalHistory: Object.keys(deskHistory).length,
+    ticketsComCusto: ticketsCusto.length,
+    totalCusto,
+    sampleStatuses: Object.values(deskHistory).slice(0,2).map(h => Object.keys(h.statusTimes||{}))
+  });
 
   // KPIs
   const ticketsComCusto = ticketsCusto.length;
