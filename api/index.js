@@ -385,7 +385,7 @@ app.post('/api/report', async (req, res) => {
     // rmaRaw usa TODOS os registros (sem filtro de período) para cruzamento com histórico
     const rmaAllCache = await getFromDb('rma', 'rma');
     const rmaAll = rmaAllCache.data || [];
-    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, purchasedNeoSolar: r.purchasedNeoSolar, testLocation: r.testLocation }));
+    const rmaRaw = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, purchasedNeoSolar: r.purchasedNeoSolar, testLocation: r.testLocation, model: r.model, fornecedor: r.fornecedor }));
     // rawFull inclui todos os campos necessários para os gráficos de produto
     const rmaRawFull = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, testDate: r.testDate }));
 
