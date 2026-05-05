@@ -2028,7 +2028,9 @@ function renderOperacao(d) {
     if (d2 < from || d2 > to) continue;
 
     // Só processa tickets que existem no RMA
-    const rma = rmaByDesk[String(h.ticketNumber)];
+    // ticketNumber pode ser string com prefixo 'rma_' para tickets antigos
+    const ticketNum = String(h.ticketNumber || '').replace('rma_', '').trim();
+    const rma = rmaByDesk[ticketNum];
     if (!rma) continue;
 
     let horasTicket = 0;
