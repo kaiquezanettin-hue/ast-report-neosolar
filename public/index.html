@@ -1588,12 +1588,29 @@ function renderProdutos(d) {
     },
     options: {
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: {
         x: { ticks: { maxRotation: 45, font: { size: 10 } } },
         y: { beginAtZero: true }
       }
-    }
+    },
+    plugins: [{
+      id: 'lineLabels',
+      afterDatasetsDraw(chart) {
+        const { ctx, data } = chart;
+        chart.getDatasetMeta(0).data.forEach((bar, i) => {
+          const val = data.datasets[0].data[i];
+          if (!val) return;
+          ctx.save();
+          ctx.font = 'bold 10px Barlow Condensed, sans-serif';
+          ctx.fillStyle = '#FFFDF0';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(val, bar.x, bar.y - 3);
+          ctx.restore();
+        });
+      }
+    }]
   });
 
   // RMA table
@@ -1617,7 +1634,6 @@ function renderProdutos(d) {
   // ── Gráficos de serviço por período (trimestral) ──
   // Usa dados calculados no backend — tem o campo service correto
   const trimestralRaw = d.rma?.trimestral || {};
-  console.log('trimestralRaw keys:', Object.keys(trimestralRaw).slice(0,3), 'sample:', JSON.stringify(Object.values(trimestralRaw)[0]));
 
   function getServicoCategoria(service) {
     const s = (service || '').trim();
@@ -1654,60 +1670,59 @@ function renderProdutos(d) {
     if (a.includes('/') && b.includes('/')) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
 
-  // Gráfico NeoSolar — barras empilhadas por período
-  // Gráfico Local de Teste — barras empilhadas por período
-  const locTrimestres = Object.keys(trimestralRaw).sort((a, b) => {
+
+  // ── Gráfico Local de Teste — direto do _rmaRaw ──
+  const rmaParaLoc = window._rmaRawFull || window._rmaRaw || [];
+  const fromDateLoc = new Date(document.getElementById('date-from').value);
+  const toDateLoc = new Date(document.getElementById('date-to').value);
+  toDateLoc.setHours(23,59,59);
+
+  const locPorPeriodo = {};
+  for (const r of rmaParaLoc) {
+    const d = parseDataBR(r.addedTime);
+    if (!d || d < fromDateLoc || d > toDateLoc) continue;
+    const loc = (r.testLocation || 'Não informado').trim() || 'Não informado';
+    const periodo = trimestres.length > 0 && trimestres[0].includes('/') 
+      ? `${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+      : `T${Math.ceil((d.getMonth()+1)/3)} ${d.getFullYear()}`;
+    if (!locPorPeriodo[periodo]) locPorPeriodo[periodo] = {};
+    locPorPeriodo[periodo][loc] = (locPorPeriodo[periodo][loc] || 0) + 1;
+  }
+
+  const locPeriodos = Object.keys(locPorPeriodo).sort((a, b) => {
     if (a.includes('/') && b.includes('/')) {
-      const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
-      return ya !== yb ? Number(ya) - Number(yb) : Number(ma) - Number(mb);
+      const [ma,ya] = a.split('/'), [mb,yb] = b.split('/');
+      return ya !== yb ? Number(ya)-Number(yb) : Number(ma)-Number(mb);
     }
-    const [qa, ya] = a.split(' '); const [qb, yb] = b.split(' ');
-    return ya !== yb ? Number(ya) - Number(yb) : qa.localeCompare(qb);
+    return a.localeCompare(b);
   });
+  const allLocs = [...new Set(Object.values(locPorPeriodo).flatMap(p => Object.keys(p)))].sort();
+  const locCoresArr = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red];
 
-  // Coleta todos os locais únicos
-  const allLocations = [...new Set(
-    Object.values(trimestralRaw).flatMap(t => Object.keys(t._locations || {}))
-  )].sort();
-  const locCores = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red, C.gray2];
+  if (locPeriodos.length > 0 && allLocs.length > 0) {
+    makeChart('chart-test-location', {
+      type: 'bar',
+      data: {
+        labels: locPeriodos,
+        datasets: allLocs.map((loc, i) => ({
+          label: loc,
+          data: locPeriodos.map(p => locPorPeriodo[p]?.[loc] || 0),
+          backgroundColor: locCoresArr[i % locCoresArr.length],
+          borderRadius: 2
+        }))
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white } } },
+        scales: {
+          x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
+          y: { stacked: true, beginAtZero: true, ticks: { color: C.gray2 } }
+        }
+      }
+    });
+  }
 
-  makeChart('chart-test-location', {
-    type: 'bar',
-    data: {
-      labels: locTrimestres,
-      datasets: allLocations.map((loc, i) => ({
-        label: loc,
-        data: locTrimestres.map(t => trimestralRaw[t]?._locations?.[loc] || 0),
-        backgroundColor: locCores[i % locCores.length],
-        borderRadius: 2
-      }))
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white } } },
-      scales: {
-        x: { stacked: true, ticks: { color: C.gray2, maxRotation: 45 } },
-        y: { stacked: true, beginAtZero: true, ticks: { color: C.gray2 } }
-      }
-    },
-    plugins: [{
-      id: 'nsTotals',
-      afterDatasetsDraw(chart) {
-        const { ctx, data } = chart;
-        const lastMeta = chart.getDatasetMeta(data.datasets.length - 1);
-        lastMeta.data.forEach((bar, i) => {
-          const total = data.datasets.reduce((s, ds) => s + (ds.data[i] || 0), 0);
-          if (!total) return;
-          ctx.save();
-          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
-          ctx.fillStyle = '#FFFDF0';
-          ctx.textAlign = 'center';
-          ctx.fillText(total, bar.x, bar.y - 5);
-          ctx.restore();
-        });
-      }
-    }]
-  });
+
 
 
 
