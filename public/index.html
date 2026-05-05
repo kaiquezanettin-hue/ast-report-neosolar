@@ -473,60 +473,48 @@ canvas { max-width: 100%; }
 
 <!-- ═══════════════════════════════════════════════════════ OPERAÇÃO -->
 <div id="tab-operacao" class="tab-content">
-  <div class="section-header">Análise Operacional</div>
-  <div class="kpis" id="kpi-operacao"></div>
-  <div class="grid2">
+  <div class="section-header">Custo de Atendimento Técnico</div>
+
+  <!-- KPIs de custo -->
+  <div class="kpis" style="margin-bottom:16px;" id="kpi-custo"></div>
+
+  <!-- Gráficos principais -->
+  <div class="grid2" style="margin-bottom:16px;">
     <div class="panel yellow">
-      <div class="panel-title">Tempo Médio por Status <span>histórico do período — vs SLA</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-avg-status-hist"></canvas></div>
+      <div class="panel-title">Custo por Linha de Produto <span>R$ estimado no período</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-custo-linha"></canvas></div>
     </div>
     <div class="panel blue">
-      <div class="panel-title">Tendência Mensal <span>tickets abertos vs fechados</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-monthly-trend"></canvas></div>
+      <div class="panel-title">Custo por Período <span>evolução mensal/trimestral</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-custo-periodo"></canvas></div>
     </div>
   </div>
-  <div class="grid2">
-    <div class="panel">
-      <div class="panel-title">SLA Atual por Status <span>tickets abertos agora</span></div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-sla-status">
-          <thead><tr>
-            <th>Status</th><th class="num">Total</th><th class="num">✅ OK</th>
-            <th class="num">⚠️ Atenção</th><th class="num">🔴 Vencido</th><th class="num">Média Atual</th>
-          </tr></thead>
-          <tbody id="tbody-sla-status"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="panel blue">
-      <div class="panel-title">Atendimentos por Técnico <span>tickets abertos agora</span></div>
-      <div class="chart-wrap"><canvas id="chart-tech"></canvas></div>
-    </div>
+
+  <!-- Top produtos mais caros -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Top 10 Produtos por Custo de Atendimento <span>R$ estimado — Em teste + Em manutenção + Aguardando laudo + Aguardando RMA</span></div>
+    <div style="position:relative;height:280px;"><canvas id="chart-custo-produto"></canvas></div>
   </div>
-  <div class="grid2">
-    <div class="panel yellow">
-      <div class="panel-title">Performance por Técnico <span>histórico do período</span></div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-tech-hist">
-          <thead><tr>
-            <th>Técnico</th><th class="num">Tickets</th><th class="num">Fechados</th>
-            <th class="num">Lead Time Médio</th><th>% Resolução</th>
-          </tr></thead>
-          <tbody id="tbody-tech-hist"></tbody>
-        </table>
-      </div>
+
+  <!-- Tabela detalhada -->
+  <div class="panel">
+    <div class="panel-title">Detalhamento por Ticket
+      <span style="margin-left:auto;font-size:11px;color:var(--gray2);">R$2/min · horas úteis 09h–18h seg–sex</span>
     </div>
-    <div class="panel">
-      <div class="panel-title">SLA Atual por Técnico <span>tickets abertos agora</span></div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-tech">
-          <thead><tr>
-            <th>Técnico</th><th class="num">Total</th><th class="num">OK</th>
-            <th class="num">Atenção</th><th class="num">Vencido</th><th>Performance</th>
-          </tr></thead>
-          <tbody id="tbody-tech"></tbody>
-        </table>
-      </div>
+    <div style="overflow-x:auto;max-height:450px;overflow-y:auto;">
+      <table class="tbl" id="tbl-custo-tickets" style="width:100%;">
+        <thead><tr>
+          <th>Ticket #</th>
+          <th>Produto</th>
+          <th>Fornecedor</th>
+          <th>Garantia</th>
+          <th class="num">H. Úteis</th>
+          <th class="num">Custo (R$)</th>
+          <th>Status de custo</th>
+          <th>Data</th>
+        </tr></thead>
+        <tbody id="tbody-custo-tickets"></tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -1998,8 +1986,162 @@ function renderValidacaoTabela() {
   }).join('');
 }
 
-// ─── OPERAÇÃO ────────────────────────────────────────────────────────
+// ─── CUSTO DE ATENDIMENTO ────────────────────────────────────────────
+const STATUS_CUSTO = new Set(['Em teste', 'Em manutençao', 'Em manutenção', 'Aguardando laudo', 'Aguardando RMA']);
+const CUSTO_POR_HORA = 120; // R$2/min = R$120/hora
+
 function renderOperacao(d) {
+  // Cruza deskHistory com RMA para calcular custo por ticket
+  const rmaByDesk = {};
+  for (const r of (window._rmaRaw || [])) {
+    const num = String(r.deskNum || '').trim();
+    if (num) rmaByDesk[num] = r;
+  }
+
+  const from = new Date(document.getElementById('date-from').value);
+  const to = new Date(document.getElementById('date-to').value);
+  to.setHours(23,59,59);
+
+  // Calcula custo por ticket
+  const ticketsCusto = [];
+  let totalHorasUteis = 0;
+  let totalCusto = 0;
+  const custoPorLinha = {};
+  const custoPorPeriodo = {};
+  const custoPorProduto = {};
+
+  for (const h of Object.values(deskHistory)) {
+    const d2 = new Date(h.createdTime);
+    if (d2 < from || d2 > to) continue;
+
+    let horasTicket = 0;
+    const statusCustoList = [];
+
+    for (const [status, hours] of Object.entries(h.statusTimes || {})) {
+      if (!STATUS_CUSTO.has(status)) continue;
+      // Calcula horas úteis reais para esse status
+      const inicio = new Date(h.createdTime);
+      const fim = new Date(inicio.getTime() + hours * 3600000);
+      const hu = horasUteisEntre(inicio, fim);
+      horasTicket += hu;
+      statusCustoList.push(status);
+    }
+
+    if (horasTicket <= 0) continue;
+
+    const custo = horasTicket * CUSTO_POR_HORA;
+    totalHorasUteis += horasTicket;
+    totalCusto += custo;
+
+    // Dados do RMA para cruzamento
+    const rma = rmaByDesk[String(h.ticketNumber)] || {};
+    const linha = rma.fornecedor || 'Não identificado';
+    const produto = rma.model || 'Não identificado';
+    const garantia = rma.validation || '—';
+
+    custoPorLinha[linha] = (custoPorLinha[linha] || 0) + custo;
+
+    const prod = produto.length > 40 ? produto.substring(0, 40) + '...' : produto;
+    custoPorProduto[prod] = (custoPorProduto[prod] || 0) + custo;
+
+    // Período
+    const mes = d2.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+    custoPorPeriodo[mes] = (custoPorPeriodo[mes] || 0) + custo;
+
+    ticketsCusto.push({
+      ticket: h.ticketNumber,
+      produto: produto.length > 50 ? produto.substring(0, 50) + '...' : produto,
+      fornecedor: linha,
+      garantia,
+      horasUteis: horasTicket,
+      custo,
+      statusList: [...new Set(statusCustoList)].join(', '),
+      data: h.createdTime
+    });
+  }
+
+  ticketsCusto.sort((a, b) => b.custo - a.custo);
+
+  // KPIs
+  const ticketsComCusto = ticketsCusto.length;
+  const custoMedio = ticketsComCusto > 0 ? totalCusto / ticketsComCusto : 0;
+  document.getElementById('kpi-custo').innerHTML = [
+    { val: `R$ ${totalCusto.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0})}`, lbl: 'Custo Total Estimado', cls: 'red' },
+    { val: ticketsComCusto, lbl: 'Tickets com Custo', cls: 'blue' },
+    { val: `${totalHorasUteis.toFixed(1)}h`, lbl: 'Horas Úteis Técnicos', cls: 'yellow' },
+    { val: `R$ ${custoMedio.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0})}`, lbl: 'Custo Médio por Ticket', cls: 'orange' },
+    { val: Object.keys(custoPorLinha).length, lbl: 'Linhas de Produto', cls: 'purple' },
+  ].map(k => `<div class="kpi ${k.cls}"><div class="val" style="font-size:18px;">${k.val}</div><div class="lbl">${k.lbl}</div></div>`).join('');
+
+  // Chart: custo por linha
+  const linhas = Object.entries(custoPorLinha).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  makeChart('chart-custo-linha', {
+    type: 'bar',
+    data: {
+      labels: linhas.map(([l]) => l),
+      datasets: [{ label: 'Custo R$', data: linhas.map(([,v]) => Math.round(v)), backgroundColor: palette(linhas.length), borderRadius: 4 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { callback: v => 'R$' + v.toLocaleString('pt-BR') } } }
+    }
+  });
+
+  // Chart: custo por período
+  const periodos = Object.entries(custoPorPeriodo).sort((a,b) => a[0].localeCompare(b[0]));
+  makeChart('chart-custo-periodo', {
+    type: 'bar',
+    data: {
+      labels: periodos.map(([p]) => p),
+      datasets: [{ label: 'Custo R$', data: periodos.map(([,v]) => Math.round(v)), backgroundColor: C.yellow, borderRadius: 4 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { callback: v => 'R$' + v.toLocaleString('pt-BR') } } }
+    }
+  });
+
+  // Chart: top 10 produtos
+  const topProd = Object.entries(custoPorProduto).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  makeChart('chart-custo-produto', {
+    type: 'bar',
+    data: {
+      labels: topProd.map(([p]) => p),
+      datasets: [{ label: 'Custo R$', data: topProd.map(([,v]) => Math.round(v)), backgroundColor: C.orange, borderRadius: 4 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { callback: v => 'R$' + v.toLocaleString('pt-BR') } } }
+    }
+  });
+
+  // Tabela detalhada
+  const fmt = v => v.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  document.getElementById('tbody-custo-tickets').innerHTML = ticketsCusto.slice(0, 200).map(t => {
+    const garantiaTxt = (t.garantia || '').toLowerCase().includes('no warranty maintenance') ? 'Manutenção Paga'
+      : (t.garantia || '').toLowerCase().includes('no warranty') ? 'Fora Garantia' : 'Garantia';
+    const garantiaCor = garantiaTxt === 'Garantia' ? C.yellow : garantiaTxt === 'Fora Garantia' ? C.green : C.orange;
+    const data = t.data ? new Date(t.data).toLocaleDateString('pt-BR') : '—';
+    return `<tr>
+      <td><strong>#${t.ticket}</strong></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.produto}">${t.produto}</td>
+      <td>${t.fornecedor}</td>
+      <td style="color:${garantiaCor};font-weight:600;">${garantiaTxt}</td>
+      <td class="num">${t.horasUteis.toFixed(1)}h</td>
+      <td class="num" style="color:var(--yellow);font-weight:600;">R$ ${fmt(t.custo)}</td>
+      <td style="font-size:10px;color:var(--gray2);">${t.statusList}</td>
+      <td>${data}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--gray2);padding:20px;">Sem dados no período — aguarde o histórico carregar</td></tr>';
+}
+
+// ─── OPERAÇÃO (legado — não usado) ───────────────────────────────────
+function _renderOperacaoLegado(d) {
   const desk = d.desk;
   const statusEntries = Object.entries(desk.slaByStatus);
   const totalDesk = desk.total;
@@ -2109,7 +2251,7 @@ function renderOperacao(d) {
       <td><div class="prog-bar"><div class="fill ${cls}" style="width:${pct}%"></div></div><div style="font-size:11px;color:var(--gray2);margin-top:2px;">${pct}% no prazo</div></td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--gray2);">Sem dados</td></tr>';
-}
+} // fim _renderOperacaoLegado
 
 // ─── IMPORTAÇÕES ─────────────────────────────────────────────────────
 function renderImportacoes(d) {
