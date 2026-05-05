@@ -457,18 +457,7 @@ canvas { max-width: 100%; }
     </div>
   </div>
 
-  <div class="panel">
-    <div class="panel-title">Detalhe de Atendimentos RMA</div>
-    <div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
-      <table class="tbl" id="tbl-rma">
-        <thead><tr>
-          <th>Fornecedor</th><th>Modelo</th><th>SKU</th><th>Defeito</th>
-          <th>Data Teste</th><th>Garantia</th><th>Serviço</th>
-        </tr></thead>
-        <tbody id="tbody-rma"></tbody>
-      </table>
-    </div>
-  </div>
+
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ OPERAÇÃO -->
@@ -1711,7 +1700,7 @@ function renderProdutos(d) {
     }
     // Formato "T1 2025"
     const [qa, ya] = a.split(' '), [qb, yb] = b.split(' ');
-    return ya !== yb ? Number(ya)-Number(yb) : qa.localeCompare(qb);
+    return ya !== yb ? Number(ya)-Number(yb) : Number(qa.replace('T',''))-Number(qb.replace('T',''));
   });
   const allLocs = [...new Set(Object.values(locPorPeriodo).flatMap(p => Object.keys(p)))].sort();
   const locCoresArr = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red];
