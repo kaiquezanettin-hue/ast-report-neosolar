@@ -481,7 +481,7 @@ canvas { max-width: 100%; }
   <!-- Gráficos principais -->
   <div class="grid2" style="margin-bottom:16px;">
     <div class="panel yellow">
-      <div class="panel-title">Custo por Linha de Produto <span>R$ estimado no período</span></div>
+      <div class="panel-title">Custo por Fornecedor <span>R$ estimado no período</span></div>
       <div style="position:relative;height:300px;"><canvas id="chart-custo-linha"></canvas></div>
     </div>
     <div class="panel blue">
@@ -492,8 +492,8 @@ canvas { max-width: 100%; }
 
   <!-- Top produtos mais caros -->
   <div class="panel" style="margin-bottom:16px;">
-    <div class="panel-title">Top 10 Produtos por Custo de Atendimento <span>R$ estimado — Em teste + Em manutenção + Aguardando laudo + Aguardando RMA</span></div>
-    <div style="position:relative;height:280px;"><canvas id="chart-custo-produto"></canvas></div>
+    <div class="panel-title">Top 15 Modelos por Custo de Atendimento <span>R$ estimado — Em teste + Em manutenção + Aguardando laudo + Aguardando RMA</span></div>
+    <div style="position:relative;height:400px;"><canvas id="chart-custo-produto"></canvas></div>
   </div>
 
   <!-- Tabela detalhada -->
@@ -2049,9 +2049,11 @@ function renderOperacao(d) {
     const produto = rma.model || 'Não identificado';
     const garantia = rma.validation || '—';
 
+    // Custo por fornecedor/linha
     custoPorLinha[linha] = (custoPorLinha[linha] || 0) + custo;
 
-    const prod = produto.length > 40 ? produto.substring(0, 40) + '...' : produto;
+    // Custo por produto (modelo completo truncado)
+    const prod = produto.length > 50 ? produto.substring(0, 50) + '...' : produto;
     custoPorProduto[prod] = (custoPorProduto[prod] || 0) + custo;
 
     // Período
@@ -2121,7 +2123,7 @@ function renderOperacao(d) {
   });
 
   // Chart: top 10 produtos
-  const topProd = Object.entries(custoPorProduto).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topProd = Object.entries(custoPorProduto).sort((a, b) => b[1] - a[1]).slice(0, 15);
   makeChart('chart-custo-produto', {
     type: 'bar',
     data: {
