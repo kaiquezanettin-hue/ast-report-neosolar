@@ -2002,11 +2002,14 @@ const CUSTO_POR_HORA = 120; // R$2/min = R$120/hora
 
 function renderOperacao(d) {
   // Cruza deskHistory com RMA para calcular custo por ticket
+  // Mapa de deskNum -> dados RMA (inclui rmaRaw e rmaRawFull)
   const rmaByDesk = {};
-  for (const r of (window._rmaRaw || [])) {
+  const allRma = window._rmaRawFull || window._rmaRaw || [];
+  for (const r of allRma) {
     const num = String(r.deskNum || '').trim();
-    if (num) rmaByDesk[num] = r;
+    if (num && num !== '0') rmaByDesk[num] = r;
   }
+  console.log('rmaByDesk size:', Object.keys(rmaByDesk).length, 'sample keys:', Object.keys(rmaByDesk).slice(0,3));
 
   const from = new Date(document.getElementById('date-from').value);
   const to = new Date(document.getElementById('date-to').value);
