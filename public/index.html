@@ -1669,7 +1669,11 @@ function renderProdutos(d) {
     // Suporta formato "T1 2025" (trimestre) e "01/2025" (mês)
     if (a.includes('/') && b.includes('/')) {
       const [ma, ya] = a.split('/'); const [mb, yb] = b.split('/');
-
+      return ya !== yb ? Number(ya)-Number(yb) : Number(ma)-Number(mb);
+    }
+    const [qa, ya2] = a.split(' '); const [qb, yb2] = b.split(' ');
+    return ya2 !== yb2 ? Number(ya2)-Number(yb2) : qa.localeCompare(qb);
+  });
 
   // ── Gráfico Local de Teste — direto do _rmaRaw ──
   const rmaParaLoc = window._rmaRawFull || window._rmaRaw || [];
