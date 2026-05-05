@@ -2055,7 +2055,9 @@ function renderOperacao(d) {
 
     // Custo por produto (modelo completo truncado)
     const prod = produto.length > 50 ? produto.substring(0, 50) + '...' : produto;
-    custoPorProduto[prod] = (custoPorProduto[prod] || 0) + custo;
+    if (!custoPorProduto[prod]) custoPorProduto[prod] = { total: 0, count: 0 };
+    custoPorProduto[prod].total += custo;
+    custoPorProduto[prod].count++;
 
     // Período
     const mes = d2.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
@@ -2159,43 +2161,27 @@ function renderOperacao(d) {
     }]
   });
 
-  // Chart: top 10 produtos
-  const topProd = Object.entries(custoPorProduto).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  // Chart: top 15 produtos — soma e média
+  const topProd = Object.entries(custoPorProduto).sort((a, b) => b[1].total - a[1].total).slice(0, 15);
   makeChart('chart-custo-produto', {
     type: 'bar',
     data: {
       labels: topProd.map(([p]) => p),
-      datasets: [{ label: 'Custo R$', data: topProd.map(([,v]) => Math.round(v)), backgroundColor: C.orange, borderRadius: 4 }]
+      datasets: [
+        { label: 'Custo Total R$', data: topProd.map(([,v]) => Math.round(v.total)), backgroundColor: C.orange, borderRadius: 4 },
+        { label: 'Custo Médio R$', data: topProd.map(([,v]) => Math.round(v.total / v.count)), backgroundColor: C.blue, borderRadius: 4 }
+      ]
     },
     options: {
       maintainAspectRatio: false,
       indexAxis: 'y',
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: R$${Math.round(ctx.raw).toLocaleString('pt-BR')} (${topProd[ctx.dataIndex][1].count} tickets)` } }
+      },
       scales: { x: { beginAtZero: true, ticks: { callback: v => 'R$' + v.toLocaleString('pt-BR') } } }
     },
-    plugins: [{
-      id: 'hbarLabels',
-      afterDatasetsDraw(chart) {
-        const { ctx, data } = chart;
-        chart.getDatasetMeta(0).data.forEach((bar, i) => {
-          const val = data.datasets[0].data[i];
-          if (!val) return;
-          const label = 'R$' + Math.round(val).toLocaleString('pt-BR');
-          ctx.save();
-          ctx.font = 'bold 11px Barlow Condensed, sans-serif';
-          ctx.fillStyle = '#1c1e20';
-          ctx.textAlign = 'right';
-          ctx.textBaseline = 'middle';
-          const x = bar.x - 6;
-          const y = bar.y;
-          // Só mostra dentro da barra se houver espaço
-          if (bar.width > 60) {
-            ctx.fillText(label, x, y);
-          }
-          ctx.restore();
-        });
-      }
-    }]
+    plugins: []
   });
 
   // Tabela detalhada
