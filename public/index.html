@@ -1673,6 +1673,7 @@ function renderProdutos(d) {
 
   // ── Gráfico Local de Teste — direto do _rmaRaw ──
   const rmaParaLoc = window._rmaRawFull || window._rmaRaw || [];
+  console.log('LOC DEBUG:', rmaParaLoc.length, rmaParaLoc[0]?.testLocation, rmaParaLoc[0]?.addedTime, locPeriodos?.length);
   const fromDateLoc = new Date(document.getElementById('date-from').value);
   const toDateLoc = new Date(document.getElementById('date-to').value);
   toDateLoc.setHours(23,59,59);
