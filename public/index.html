@@ -1673,14 +1673,23 @@ function renderProdutos(d) {
 
   // ── Gráfico Local de Teste — direto do _rmaRaw ──
   const rmaParaLoc = window._rmaRawFull || window._rmaRaw || [];
-  console.log('LOC DEBUG:', rmaParaLoc.length, rmaParaLoc[0]?.testLocation, rmaParaLoc[0]?.addedTime, locPeriodos?.length);
   const fromDateLoc = new Date(document.getElementById('date-from').value);
   const toDateLoc = new Date(document.getElementById('date-to').value);
   toDateLoc.setHours(23,59,59);
 
+  // Parser específico para o formato "28-Apr-2026 14:51:54"
+  const MONTHS_LOC = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+  function parseLocDate(str) {
+    if (!str) return null;
+    const m = str.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+    if (m) return new Date(parseInt(m[3]), MONTHS_LOC[m[2]], parseInt(m[1]));
+    const d = new Date(str);
+    return isNaN(d) ? null : d;
+  }
+
   const locPorPeriodo = {};
   for (const r of rmaParaLoc) {
-    const d = parseDataBR(r.addedTime);
+    const d = parseLocDate(r.addedTime);
     if (!d || d < fromDateLoc || d > toDateLoc) continue;
     const loc = (r.testLocation || 'Não informado').trim() || 'Não informado';
     const periodo = trimestres.length > 0 && trimestres[0].includes('/') 
