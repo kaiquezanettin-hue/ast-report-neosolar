@@ -387,8 +387,7 @@ app.post('/api/report', async (req, res) => {
     const rmaAll = rmaAllCache.data || [];
     // Envia todos os campos do RMA para o frontend — evita problemas de campos faltando
     const rmaRaw = rmaAll;
-    // rawFull inclui todos os campos necessários para os gráficos de produto
-    const rmaRawFull = rmaAll.map(r => ({ deskNum: r.deskNum, validation: r.validation, addedTime: r.addedTime, service: r.service, testDate: r.testDate }));
+    const rmaRawFull = rmaAll; // mesmo que rmaRaw — todos os campos
 
     // Dados trimestrais por serviço e garantia (usa addedTime, todos os registros)
     function getTrimestre(dateStr) {
@@ -494,23 +493,7 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// ─── Histórico de um ticket ─────────────────────────────────────────── v2
-app.get('/api/desk-history', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-    const token = await getDeskToken();
-    await delay(150);
-    const hist = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-    const events = hist.data.data || [];
-    res.json({ ticketId, version: 2, eventsCount: events.length, raw: events.slice(0, 2) });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+
 
 
 
