@@ -2053,7 +2053,8 @@ function renderOperacao(d) {
     totalCusto += custo;
 
     // Dados do RMA para cruzamento (já garantido acima)
-    const linha = rma.fornecedor || 'Não identificado';
+    const linha = rma.fornecedor || rma.fornecedorNome || 'Não identificado';
+    console.log('ticket:', h.ticketNumber, 'rma:', JSON.stringify(rma));
     const produto = rma.model || 'Não identificado';
     const garantia = rma.validation || '—';
 
