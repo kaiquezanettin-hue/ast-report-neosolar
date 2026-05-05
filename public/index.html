@@ -2009,7 +2009,7 @@ function renderOperacao(d) {
     const num = String(r.deskNum || '').trim();
     if (num && num !== '0') rmaByDesk[num] = r;
   }
-  console.log('rmaByDesk size:', Object.keys(rmaByDesk).length, 'sample keys:', Object.keys(rmaByDesk).slice(0,3));
+
 
   const from = new Date(document.getElementById('date-from').value);
   const to = new Date(document.getElementById('date-to').value);
@@ -2026,6 +2026,10 @@ function renderOperacao(d) {
   for (const h of Object.values(deskHistory)) {
     const d2 = new Date(h.createdTime);
     if (d2 < from || d2 > to) continue;
+
+    // Só processa tickets que existem no RMA
+    const rma = rmaByDesk[String(h.ticketNumber)];
+    if (!rma) continue;
 
     let horasTicket = 0;
     const statusCustoList = [];
@@ -2046,8 +2050,7 @@ function renderOperacao(d) {
     totalHorasUteis += horasTicket;
     totalCusto += custo;
 
-    // Dados do RMA para cruzamento
-    const rma = rmaByDesk[String(h.ticketNumber)] || {};
+    // Dados do RMA para cruzamento (já garantido acima)
     const linha = rma.fornecedor || 'Não identificado';
     const produto = rma.model || 'Não identificado';
     const garantia = rma.validation || '—';
@@ -2076,12 +2079,7 @@ function renderOperacao(d) {
   }
 
   ticketsCusto.sort((a, b) => b.custo - a.custo);
-  console.log('Custo debug:', {
-    totalHistory: Object.keys(deskHistory).length,
-    ticketsComCusto: ticketsCusto.length,
-    totalCusto,
-    sampleStatuses: Object.values(deskHistory).slice(0,2).map(h => Object.keys(h.statusTimes||{}))
-  });
+
 
   // KPIs
   const ticketsComCusto = ticketsCusto.length;
