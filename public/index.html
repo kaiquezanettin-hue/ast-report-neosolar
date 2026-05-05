@@ -1709,7 +1709,9 @@ function renderProdutos(d) {
       const [ma,ya] = a.split('/'), [mb,yb] = b.split('/');
       return ya !== yb ? Number(ya)-Number(yb) : Number(ma)-Number(mb);
     }
-    return a.localeCompare(b);
+    // Formato "T1 2025"
+    const [qa, ya] = a.split(' '), [qb, yb] = b.split(' ');
+    return ya !== yb ? Number(ya)-Number(yb) : qa.localeCompare(qb);
   });
   const allLocs = [...new Set(Object.values(locPorPeriodo).flatMap(p => Object.keys(p)))].sort();
   const locCoresArr = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red];
