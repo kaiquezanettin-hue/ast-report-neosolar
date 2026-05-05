@@ -1692,7 +1692,8 @@ function renderProdutos(d) {
     const d = parseLocDate(r.addedTime);
     if (!d || d < fromDateLoc || d > toDateLoc) continue;
     const loc = (r.testLocation || 'Não informado').trim() || 'Não informado';
-    const periodo = trimestres.length > 0 && trimestres[0].includes('/') 
+    const diffDaysLoc = (toDateLoc - fromDateLoc) / (1000*60*60*24);
+    const periodo = diffDaysLoc <= 92
       ? `${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
       : `T${Math.ceil((d.getMonth()+1)/3)} ${d.getFullYear()}`;
     if (!locPorPeriodo[periodo]) locPorPeriodo[periodo] = {};
