@@ -1738,16 +1738,6 @@ function renderProdutos(d) {
   }
 
 
-
-
-
-
-      return ya !== yb ? ya - yb : ma - mb;
-    }
-    const [qa, ya] = a.split(' '); const [qb, yb] = b.split(' ');
-    return ya !== yb ? ya - yb : qa.localeCompare(qb);
-  });
-
   const servicoDatasets = (mode) => servicosCats.map((cat, i) => ({
     label: cat,
     data: trimestres.map(t => {
