@@ -529,28 +529,25 @@ canvas { max-width: 100%; }
   </div>
 
  <!-- Chamados por garantia -->
-<div class="grid2" style="margin-bottom:16px;">
+<div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:16px;margin-bottom:16px;">
     <div class="panel">
       <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
       <div style="position:relative;height:300px;width:100%;"><canvas id="chart-garantia-donut"></canvas></div>
       <div id="donut-garantia-legenda" style="text-align:center;margin-top:10px;"></div>
     </div>
-    <div class="panel">
-      <div class="panel-title">Total de Chamados por Período <span>por tipo de garantia</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-garantia-periodo"></canvas></div>
-    </div>
-  </div>
-  <div class="grid2" style="margin-bottom:16px;">
     <div class="panel yellow">
       <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
       <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Total de Chamados por Período <span>por tipo de garantia</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-garantia-periodo"></canvas></div>
     </div>
     <div class="panel blue">
       <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
       <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
     </div>
   </div>
-
 <!-- OPERAÇÃO -->
 <div id="tab-operacao" class="tab-content">
   <div class="section-header">Custo de Atendimento Técnico</div>
