@@ -1316,14 +1316,14 @@ function renderProdutos(d) {
   function getServCat(service) {
     const s=(service||'').trim();
     if(s==='Flawless'||s==='Firmware Update')return 'A - Sem Defeito';
-    if(s==='Analyze'||s==='Software upgrade')return 'B - Sem Serviço';
+    if(s==='Analyze'||s==='Software upgrade')return 'B - Sem Garantia (Serviço não aprovado)';
     if(s==='Recharge')return 'C - Recarga Bateria';
     if(s==='PCB Replacement'||s==='PCB replacement')return 'D - Subst. PCB';
     if(s==='Component Replacement'||s==='Component Replacement - dismantle'||s==='Component Maintenance')return 'E - Subst. Componentes';
     if(s==='Product Exchange')return 'F - Troca de Produto';
-    return 'B - Sem Serviço';
+    return 'B - Sem Garantia (Serviço não aprovado)';
   }
-  const servicosCats=['A - Sem Defeito','B - Sem Serviço','C - Recarga Bateria','D - Subst. PCB','E - Subst. Componentes','F - Troca de Produto'];
+  const servicosCats=['A - Sem Defeito','B - Sem Garantia (Serviço não aprovado)','C - Recarga Bateria','D - Subst. PCB','E - Subst. Componentes','F - Troca de Produto'];
   const servicoCores=['#52c878','#5299e0','#e09052','#FFD04C','#9b59e0','#e05252'];
   const trimestreData={},garantiaTrimestre={};
   for(const[trim,data]of Object.entries(trimestralRaw)){
