@@ -528,17 +528,7 @@ canvas { max-width: 100%; }
     </div>
   </div>
 
-  <div class="grid2" style="margin-bottom:16px;">
-    <div class="panel yellow">
-      <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
-    </div>
-    <div class="panel blue">
-      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
-      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
-    </div>
-  </div>
-
+ <!-- Chamados por garantia -->
   <div class="grid2" style="margin-bottom:16px;">
     <div class="panel">
       <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
@@ -550,7 +540,18 @@ canvas { max-width: 100%; }
       <div class="chart-wrap tall"><canvas id="chart-garantia-periodo"></canvas></div>
     </div>
   </div>
-</div>
+
+  <!-- Gráficos de serviço por período -->
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel yellow">
+      <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
+    </div>
+  </div>
 
 <!-- OPERAÇÃO -->
 <div id="tab-operacao" class="tab-content">
