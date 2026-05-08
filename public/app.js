@@ -73,6 +73,18 @@ function switchTab(id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById(`tab-${id}`).classList.add('active');
   event.target.classList.add('active');
+
+  // Mostra filtro de garantia só na aba Produtos
+  const garantiaBar   = document.getElementById('garantia-filter-bar');
+  const garantiaLabel = document.querySelector('.garantia-inline-label');
+  const garantiaCount = document.getElementById('prod-filter-count');
+  const sep           = document.querySelector('.period-bar-sep');
+  const isProdutos    = id === 'produtos';
+  if (garantiaBar)   garantiaBar.style.display   = isProdutos ? 'flex' : 'none';
+  if (garantiaLabel) garantiaLabel.style.display  = isProdutos ? ''     : 'none';
+  if (garantiaCount) garantiaCount.style.display  = isProdutos ? ''     : 'none';
+  if (sep)           sep.style.display            = isProdutos ? ''     : 'none';
+
   if (id === 'produtos' && window._lastReportData) setTimeout(() => renderProdutos(window._lastReportData), 80);
   if (id === 'sla' && typeof renderSlaReport === 'function') setTimeout(() => renderSlaReport(), 80);
   if (id === 'operacao' && window._lastReportData) setTimeout(() => renderOperacao(window._lastReportData), 80);
@@ -316,7 +328,7 @@ function renderVisaoGeral(d) {
 // ════════════════════════════════════════════════════════════════════
 function setProdGarantia(tipo, btn) {
   prodGarantiaFiltro = tipo; prodSelecionado = null;
-  document.querySelectorAll('.filtro-garantia-btns button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#garantia-filter-bar button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   if (window._lastReportData) renderProdutos(window._lastReportData);
 }
@@ -726,6 +738,18 @@ function renderSourceStatus(ds) {
 });
 
 // ── Init ─────────────────────────────────────────────────────────────
+// Esconde filtro de garantia — só aparece na aba Produtos
+document.addEventListener('DOMContentLoaded', () => {
+  const garantiaBar   = document.getElementById('garantia-filter-bar');
+  const garantiaLabel = document.querySelector('.garantia-inline-label');
+  const garantiaCount = document.getElementById('prod-filter-count');
+  const sep           = document.querySelector('.period-bar-sep');
+  if (garantiaBar)   garantiaBar.style.display   = 'none';
+  if (garantiaLabel) garantiaLabel.style.display  = 'none';
+  if (garantiaCount) garantiaCount.style.display  = 'none';
+  if (sep)           sep.style.display            = 'none';
+});
+
 setInterval(loadData, 2 * 60 * 60 * 1000);
 setPeriodAll();
 loadData();
