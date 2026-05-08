@@ -28,7 +28,7 @@
 </header>
 
 <!-- ═══════════════════════════════════════════════
-     BARRA DE PERÍODO
+     BARRA DE PERÍODO + FILTRO DE GARANTIA (sticky)
 ════════════════════════════════════════════════ -->
 <div class="period-bar">
   <label>De</label><input type="date" id="date-from"/>
@@ -41,11 +41,25 @@
     <button onclick="setPeriodAll()" id="sh-all">Tudo</button>
   </div>
   <button class="apply-btn" onclick="loadData()">Aplicar</button>
+
+  <!-- Separador -->
+  <div class="period-bar-sep"></div>
+
+  <!-- Filtro de garantia — visível só na aba Produtos -->
+  <span class="garantia-inline-label">Garantia</span>
+  <div class="garantia-inline-btns" id="garantia-filter-bar">
+    <button class="active" onclick="setProdGarantia('todos',this)">Todos</button>
+    <button onclick="setProdGarantia('garantia',this)">✓ Em Garantia</button>
+    <button onclick="setProdGarantia('fora',this)">✗ Fora de Garantia</button>
+    <button onclick="setProdGarantia('manutencao',this)">🔧 Manutenção Paga</button>
+  </div>
+  <div id="prod-filter-count" style="font-size:11px;color:var(--gray2);white-space:nowrap;"></div>
+
   <div class="data-status" id="data-status"></div>
 </div>
 
 <!-- ═══════════════════════════════════════════════
-     TABS
+     TABS (sticky)
 ════════════════════════════════════════════════ -->
 <div class="tabs">
   <button class="tab active" onclick="switchTab('visao-geral')">Visão Geral</button>
@@ -91,19 +105,7 @@
 <div id="tab-produtos" class="tab-content">
   <div class="section-header">Análise de Produtos</div>
 
-  <!-- Filtro de garantia -->
-  <div class="produtos-filter-bar">
-    <label>Garantia</label>
-    <div class="filtro-garantia-btns">
-      <button class="active" onclick="setProdGarantia('todos',this)">Todos</button>
-      <button onclick="setProdGarantia('garantia',this)">✓ Em Garantia</button>
-      <button onclick="setProdGarantia('fora',this)">✗ Fora de Garantia</button>
-      <button onclick="setProdGarantia('manutencao',this)">🔧 Manutenção Paga</button>
-    </div>
-    <div id="prod-filter-count" style="margin-left:auto;font-size:12px;color:var(--gray2);"></div>
-  </div>
-
-  <!-- Gráficos linha / local de teste — ANTES do Top 10 -->
+  <!-- Gráficos linha / local de teste -->
   <div class="grid2">
     <div class="panel blue">
       <div class="panel-title">Entradas por Linha de Produto</div>
