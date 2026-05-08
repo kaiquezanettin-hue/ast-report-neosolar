@@ -41,11 +41,8 @@ const SLA_DIAS_UTEIS = {
   'Em tratativa p/ devoluçao cliente': 2.0, 'Aguardando coleta': 1.0
 };
 
-// Status que geram custo de atendimento técnico
 const STATUS_CUSTO = new Set(['Em teste', 'Em manutençao', 'Em manutenção', 'Aguardando laudo', 'Aguardando RMA']);
-const CUSTO_POR_HORA = 120; // R$2/min = R$120/hora
-
-// Status ignorados em cálculos
+const CUSTO_POR_HORA = 120;
 const STATUS_CONCLUIDOS = new Set(['Descarte', 'Produto despachado AST', 'Produto despachado']);
 
 // ── Relógio ──────────────────────────────────────────────────────────
@@ -315,7 +312,7 @@ function renderVisaoGeral(d) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// ABA: PRODUTOS
+// ABA: PRODUTOS — helpers de filtro
 // ════════════════════════════════════════════════════════════════════
 function setProdGarantia(tipo, btn) {
   prodGarantiaFiltro = tipo; prodSelecionado = null;
@@ -323,25 +320,34 @@ function setProdGarantia(tipo, btn) {
   btn.classList.add('active');
   if (window._lastReportData) renderProdutos(window._lastReportData);
 }
+
+// Filtra array RMA pelo tipo de garantia selecionado
 function getRmaFiltradoProd(raw) {
   if (prodGarantiaFiltro === 'todos') return raw;
   return raw.filter(r => {
     const v = (r.validation || '').toLowerCase();
-    if (prodGarantiaFiltro === 'garantia') return !v.includes('no warranty');
-    if (prodGarantiaFiltro === 'fora') return v.includes('no warranty') && !v.includes('maintenance');
-    if (prodGarantiaFiltro === 'manutencao') return v.includes('no warranty maintenance');
+    if (prodGarantiaFiltro === 'garantia')    return !v.includes('no warranty');
+    if (prodGarantiaFiltro === 'fora')        return v.includes('no warranty') && !v.includes('maintenance');
+    if (prodGarantiaFiltro === 'manutencao')  return v.includes('no warranty maintenance');
     return true;
   });
 }
+
+// Retorna RMA filtrado por garantia E por período — usado por todos os gráficos da aba
 function getRmaPeriodo() {
   const from = new Date(document.getElementById('date-from').value);
-  const to = new Date(document.getElementById('date-to').value); to.setHours(23,59,59);
-  const raw = window._rmaRawFull || window._rmaRaw || [];
-  return getRmaFiltradoProd(raw).filter(r => { const d = parseRmaDate(r.addedTime); return d && d >= from && d <= to; });
+  const to   = new Date(document.getElementById('date-to').value); to.setHours(23,59,59);
+  const raw  = window._rmaRawFull || window._rmaRaw || [];
+  return getRmaFiltradoProd(raw).filter(r => {
+    const d = parseRmaDate(r.addedTime);
+    return d && d >= from && d <= to;
+  });
 }
-function selecionarProd(model) { prodSelecionado = prodSelecionado === model ? null : model; renderTopProducts(); renderTopFaults(); }
-function clearProdSel() { prodSelecionado = null; renderTopProducts(); renderTopFaults(); }
 
+function selecionarProd(model) { prodSelecionado = prodSelecionado === model ? null : model; renderTopProducts(); renderTopFaults(); }
+function clearProdSel()        { prodSelecionado = null; renderTopProducts(); renderTopFaults(); }
+
+// ── Top 10 produtos ──────────────────────────────────────────────────
 function renderTopProducts() {
   const dados = getRmaPeriodo(), contagem = {};
   for (const r of dados) { const m = (r.model||'Desconhecido').trim(); contagem[m] = (contagem[m]||0) + 1; }
@@ -356,6 +362,7 @@ function renderTopProducts() {
   }).join('');
 }
 
+// ── Top defeitos ─────────────────────────────────────────────────────
 function renderTopFaults() {
   const dados = getRmaPeriodo().filter(r => !prodSelecionado || (r.model||'').trim() === prodSelecionado), contagem = {};
   for (const r of dados) { const f = (r.fault||r.defect||r.issue||'').trim(); if (!f||f==='—'||f==='-') continue; contagem[f] = (contagem[f]||0) + 1; }
@@ -368,12 +375,51 @@ function renderTopFaults() {
   el.innerHTML = `<div class="fade-up">${top.map(([fault,count]) => { const pct = Math.round(count/max*100), label = fault.length > 45 ? fault.substring(0,45)+'…' : fault; return `<div class="hbar-item-click" style="cursor:default;"><div class="row"><span class="nome" title="${fault}">${label}</span><strong>${count}</strong></div><div class="hbar-track"><div class="hbar-fill red" style="width:${pct}%"></div></div></div>`; }).join('')}</div>`;
 }
 
+// ════════════════════════════════════════════════════════════════════
+// ABA: PRODUTOS — renderização completa
+// Todos os gráficos usam getRmaPeriodo() que já aplica filtro de garantia
+// ════════════════════════════════════════════════════════════════════
 function renderProdutos(d) {
-  renderTopProducts(); renderTopFaults();
-  const r = d.rma, lines = Object.entries(r.lineCount).sort((a,b) => b[1]-a[1]);
+  // dados já filtrados por garantia + período
+  const dadosFiltrados = getRmaPeriodo();
+
+  renderTopProducts();
+  renderTopFaults();
+
+  // ── Entradas por Linha de Produto ────────────────────────────────
+  const lineCount = {};
+  for (const r of dadosFiltrados) {
+    const linha = (r.fornecedor || r.linha || r.lineProduct || 'Outros').trim();
+    lineCount[linha] = (lineCount[linha]||0) + 1;
+  }
+  // fallback: se não tiver campo de linha no RMA, usa lineCount do backend mas filtrado
+  const lines = Object.keys(lineCount).length > 0
+    ? Object.entries(lineCount).sort((a,b) => b[1]-a[1])
+    : Object.entries(d.rma.lineCount).sort((a,b) => b[1]-a[1]);
+
   makeChart('chart-line2', { type:'bar', data:{ labels:lines.map(l=>l[0]), datasets:[{ label:'Atendimentos', data:lines.map(l=>l[1]), backgroundColor:palette(lines.length), borderRadius:4 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ display:false }, tooltip:{ enabled:false } }, scales:{ x:{ ticks:{ maxRotation:45, font:{ size:10 }}}, y:{ beginAtZero:true }}}, plugins:[{ id:'lineLabels', afterDatasetsDraw(chart) { const {ctx,data}=chart; chart.getDatasetMeta(0).data.forEach((bar,i) => { const val=data.datasets[0].data[i]; if (!val) return; ctx.save(); ctx.font='bold 10px Barlow Condensed, sans-serif'; ctx.fillStyle='#FFFDF0'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(val,bar.x,bar.y-3); ctx.restore(); }); }}]});
 
-  const trimestralRaw = d.rma?.trimestral || {};
+  // ── Local de Teste ───────────────────────────────────────────────
+  const from = new Date(document.getElementById('date-from').value);
+  const to   = new Date(document.getElementById('date-to').value); to.setHours(23,59,59);
+  const locPorPeriodo = {};
+  for (const r of dadosFiltrados) {
+    const d2 = parseRmaDate(r.addedTime); if (!d2) continue;
+    const loc = (r.testLocation||'Não informado').trim()||'Não informado';
+    const diff = (to-from)/(1000*60*60*24);
+    const periodo = diff<=92 ? `${String(d2.getMonth()+1).padStart(2,'0')}/${d2.getFullYear()}` : `T${Math.ceil((d2.getMonth()+1)/3)} ${d2.getFullYear()}`;
+    if (!locPorPeriodo[periodo]) locPorPeriodo[periodo] = {};
+    locPorPeriodo[periodo][loc] = (locPorPeriodo[periodo][loc]||0) + 1;
+  }
+  const locPeriodos = Object.keys(locPorPeriodo).sort((a,b) => {
+    if (a.includes('/')&&b.includes('/')) { const[ma,ya]=a.split('/');const[mb,yb]=b.split('/'); return ya!==yb?Number(ya)-Number(yb):Number(ma)-Number(mb); }
+    const[qa,ya]=a.split(' ');const[qb,yb]=b.split(' '); return ya!==yb?Number(ya)-Number(yb):Number(qa.replace('T',''))-Number(qb.replace('T',''));
+  });
+  const allLocs = [...new Set(Object.values(locPorPeriodo).flatMap(p => Object.keys(p)))].sort();
+  const locCores = [C.yellow,C.blue,C.green,C.orange,C.purple,C.red];
+  if (locPeriodos.length>0&&allLocs.length>0) makeChart('chart-test-location', { type:'bar', data:{ labels:locPeriodos, datasets:allLocs.map((loc,i) => ({ label:loc, data:locPeriodos.map(p=>locPorPeriodo[p]?.[loc]||0), backgroundColor:locCores[i%locCores.length], borderRadius:2 })) }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, color:C.white }}}, scales:{ x:{ stacked:true, ticks:{ color:C.gray2, maxRotation:45 }}, y:{ stacked:true, beginAtZero:true, ticks:{ color:C.gray2 }}}}});
+
+  // ── Serviços e garantia por trimestre — usa dadosFiltrados ────────
   function getServCat(service) {
     const s = (service||'').trim();
     if (s==='Flawless'||s==='Firmware Update') return 'A - Sem Defeito';
@@ -386,44 +432,70 @@ function renderProdutos(d) {
   }
   const servicosCats = ['A - Sem Defeito','B - Sem Garantia (Serviço não aprovado)','C - Recarga Bateria','D - Subst. PCB','E - Subst. Componentes','F - Troca de Produto'];
   const servicoCores = ['#52c878','#5299e0','#e09052','#FFD04C','#9b59e0','#e05252'];
+
+  // Recalcula trimestreData e garantiaTrimestre a partir dos dados filtrados
   const trimestreData = {}, garantiaTrimestre = {};
-  for (const [trim, data] of Object.entries(trimestralRaw)) {
-    trimestreData[trim] = {}; garantiaTrimestre[trim] = { warranty:data.warranty||0, noWarranty:data.noWarranty||0, maintenance:data.maintenance||0 };
-    for (const [svc, count] of Object.entries(data.services||{})) { const cat = getServCat(svc); trimestreData[trim][cat] = (trimestreData[trim][cat]||0) + count; }
+  for (const r of dadosFiltrados) {
+    const d2 = parseRmaDate(r.addedTime); if (!d2) continue;
+    const trim = `T${Math.ceil((d2.getMonth()+1)/3)} ${d2.getFullYear()}`;
+    if (!trimestreData[trim]) trimestreData[trim] = {};
+    if (!garantiaTrimestre[trim]) garantiaTrimestre[trim] = { warranty:0, noWarranty:0, maintenance:0 };
+    // serviço
+    const svcRaw = r.service || r.serviceType || '';
+    const cat = getServCat(svcRaw);
+    trimestreData[trim][cat] = (trimestreData[trim][cat]||0) + 1;
+    // garantia
+    const v = (r.validation||'').toLowerCase();
+    if (v.includes('no warranty maintenance')) garantiaTrimestre[trim].maintenance++;
+    else if (v.includes('no warranty')) garantiaTrimestre[trim].noWarranty++;
+    else garantiaTrimestre[trim].warranty++;
   }
-  const trimestres = Object.keys(trimestreData).sort((a,b) => {
-    if (a.includes('/')&&b.includes('/')) { const[ma,ya]=a.split('/');const[mb,yb]=b.split('/'); return ya!==yb?Number(ya)-Number(yb):Number(ma)-Number(mb); }
-    const[qa,ya2]=a.split(' ');const[qb,yb2]=b.split(' '); return ya2!==yb2?Number(ya2)-Number(yb2):qa.localeCompare(qb);
-  });
 
-  // Local de teste
-  const rmaParaLoc = window._rmaRawFull||window._rmaRaw||[];
-  const fromDateLoc = new Date(document.getElementById('date-from').value), toDateLoc = new Date(document.getElementById('date-to').value); toDateLoc.setHours(23,59,59);
-  const locPorPeriodo = {};
-  for (const r of rmaParaLoc) {
-    const d2 = parseRmaDate(r.addedTime); if (!d2||d2<fromDateLoc||d2>toDateLoc) continue;
-    const loc = (r.testLocation||'Não informado').trim()||'Não informado', diff = (toDateLoc-fromDateLoc)/(1000*60*60*24);
-    const periodo = diff<=92 ? `${String(d2.getMonth()+1).padStart(2,'0')}/${d2.getFullYear()}` : `T${Math.ceil((d2.getMonth()+1)/3)} ${d2.getFullYear()}`;
-    if (!locPorPeriodo[periodo]) locPorPeriodo[periodo] = {};
-    locPorPeriodo[periodo][loc] = (locPorPeriodo[periodo][loc]||0) + 1;
+  // Se não tiver campos de serviço/garantia no RMA filtrado, faz fallback pro backend filtrado
+  const temDados = Object.keys(trimestreData).length > 0;
+  let trimestres, trimestreDataFinal, garantiaTrimFinal;
+  if (temDados) {
+    trimestres = Object.keys(trimestreData).sort((a,b) => {
+      const[qa,ya]=a.split(' ');const[qb,yb]=b.split(' ');
+      return ya!==yb?Number(ya)-Number(yb):Number(qa.replace('T',''))-Number(qb.replace('T',''));
+    });
+    trimestreDataFinal = trimestreData;
+    garantiaTrimFinal  = garantiaTrimestre;
+  } else {
+    // fallback: usa dados do backend (sem filtro de garantia aplicado nos serviços)
+    const trimestralRaw = d.rma?.trimestral || {};
+    trimestreDataFinal = {}; garantiaTrimFinal = {};
+    for (const [trim, data] of Object.entries(trimestralRaw)) {
+      trimestreDataFinal[trim] = {};
+      garantiaTrimFinal[trim] = { warranty:data.warranty||0, noWarranty:data.noWarranty||0, maintenance:data.maintenance||0 };
+      for (const [svc, count] of Object.entries(data.services||{})) {
+        const cat = getServCat(svc); trimestreDataFinal[trim][cat] = (trimestreDataFinal[trim][cat]||0) + count;
+      }
+    }
+    trimestres = Object.keys(trimestreDataFinal).sort((a,b) => {
+      if (a.includes('/')&&b.includes('/')) { const[ma,ya]=a.split('/');const[mb,yb]=b.split('/'); return ya!==yb?Number(ya)-Number(yb):Number(ma)-Number(mb); }
+      const[qa,ya2]=a.split(' ');const[qb,yb2]=b.split(' '); return ya2!==yb2?Number(ya2)-Number(yb2):qa.localeCompare(qb);
+    });
   }
-  const locPeriodos = Object.keys(locPorPeriodo).sort((a,b) => {
-    if (a.includes('/')&&b.includes('/')) { const[ma,ya]=a.split('/');const[mb,yb]=b.split('/'); return ya!==yb?Number(ya)-Number(yb):Number(ma)-Number(mb); }
-    const[qa,ya]=a.split(' ');const[qb,yb]=b.split(' '); return ya!==yb?Number(ya)-Number(yb):Number(qa.replace('T',''))-Number(qb.replace('T',''));
-  });
-  const allLocs = [...new Set(Object.values(locPorPeriodo).flatMap(p => Object.keys(p)))].sort(), locCores = [C.yellow,C.blue,C.green,C.orange,C.purple,C.red];
-  if (locPeriodos.length>0&&allLocs.length>0) makeChart('chart-test-location', { type:'bar', data:{ labels:locPeriodos, datasets:allLocs.map((loc,i) => ({ label:loc, data:locPeriodos.map(p=>locPorPeriodo[p]?.[loc]||0), backgroundColor:locCores[i%locCores.length], borderRadius:2 })) }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, color:C.white }}}, scales:{ x:{ stacked:true, ticks:{ color:C.gray2, maxRotation:45 }}, y:{ stacked:true, beginAtZero:true, ticks:{ color:C.gray2 }}}}});
 
-  const servicoDatasets = (mode) => servicosCats.map((cat,i) => ({ label:cat, data:trimestres.map(t => { if (mode==='pct') { const total=Object.values(trimestreData[t]||{}).reduce((s,v)=>s+v,0); return total>0?Math.round((trimestreData[t]?.[cat]||0)/total*100):0; } return trimestreData[t]?.[cat]||0; }), backgroundColor:servicoCores[i], borderColor:servicoCores[i], borderRadius:2, stack:'stack' }));
+  const servicoDatasets = (mode) => servicosCats.map((cat,i) => ({ label:cat, data:trimestres.map(t => { if (mode==='pct') { const total=Object.values(trimestreDataFinal[t]||{}).reduce((s,v)=>s+v,0); return total>0?Math.round((trimestreDataFinal[t]?.[cat]||0)/total*100):0; } return trimestreDataFinal[t]?.[cat]||0; }), backgroundColor:servicoCores[i], borderColor:servicoCores[i], borderRadius:2, stack:'stack' }));
   const segPlugin = (suffix) => ({ id:'seg'+suffix, afterDatasetsDraw(chart) { const {ctx,data}=chart; data.datasets.forEach((ds,di) => { const meta=chart.getDatasetMeta(di); meta.data.forEach((bar,i) => { const val=ds.data[i]; if (!val||val<(suffix==='Pct'?5:3)) return; const bh=Math.abs(bar.base-bar.y); if (bh<14) return; ctx.save(); ctx.font='bold 10px Barlow Condensed, sans-serif'; ctx.fillStyle='#1c1e20'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(val+(suffix==='Pct'?'%':''),bar.x,bar.y+bh/2); ctx.restore(); }); }); }});
+
   makeChart('chart-servico-abs', { type:'bar', data:{ labels:trimestres, datasets:servicoDatasets('abs') }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ boxWidth:12, font:{ size:11 }, color:C.white }}}, scales:{ x:{ stacked:true, ticks:{ color:C.gray2, maxRotation:45 }}, y:{ stacked:true, beginAtZero:true, ticks:{ color:C.gray2 }}}}, plugins:[segPlugin('')]});
   makeChart('chart-servico-pct', { type:'bar', data:{ labels:trimestres, datasets:servicoDatasets('pct') }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ boxWidth:12, font:{ size:11 }, color:C.white }}}, scales:{ x:{ stacked:true, ticks:{ color:C.gray2, maxRotation:45 }}, y:{ stacked:true, max:100, ticks:{ color:C.gray2, callback:v=>v+'%' }}}}, plugins:[segPlugin('Pct')]});
 
-  const totalW=Object.values(garantiaTrimestre).reduce((s,v)=>s+v.warranty,0), totalNW=Object.values(garantiaTrimestre).reduce((s,v)=>s+v.noWarranty,0), totalM=Object.values(garantiaTrimestre).reduce((s,v)=>s+v.maintenance,0), totalG=totalW+totalNW+totalM;
+  // ── Donut garantia ───────────────────────────────────────────────
+  const totalW=Object.values(garantiaTrimFinal).reduce((s,v)=>s+v.warranty,0);
+  const totalNW=Object.values(garantiaTrimFinal).reduce((s,v)=>s+v.noWarranty,0);
+  const totalM=Object.values(garantiaTrimFinal).reduce((s,v)=>s+v.maintenance,0);
+  const totalG=totalW+totalNW+totalM;
   makeChart('chart-garantia-donut', { type:'doughnut', data:{ labels:['Garantia','Sem Garantia','Manutenção Paga'], datasets:[{ data:[totalW,totalNW,totalM], backgroundColor:[C.yellow,C.green,C.orange], borderWidth:2, borderColor:C.bg2 }] }, options:{ maintainAspectRatio:false, cutout:'60%', centerText:{ line1:totalG.toString(), line2:'Total de Chamados' }, plugins:{ legend:{ display:false }, tooltip:{ enabled:false }}}, plugins:[{ id:'donutLabels', afterDatasetsDraw(chart) { const {ctx}=chart,dataset=chart.data.datasets[0],total=dataset.data.reduce((a,b)=>a+b,0); chart.getDatasetMeta(0).data.forEach((arc,i) => { const val=dataset.data[i]; if (!val||val/total<0.05) return; const angle=(arc.startAngle+arc.endAngle)/2,r=(arc.innerRadius+arc.outerRadius)/2,x=arc.x+Math.cos(angle)*r,y=arc.y+Math.sin(angle)*r,pct=Math.round(val/total*100); ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='bold 13px Barlow Condensed, sans-serif'; ctx.fillStyle='#1c1e20'; ctx.fillText(pct+'%',x,y-7); ctx.font='10px Barlow, sans-serif'; ctx.fillText(val,x,y+7); ctx.restore(); }); }}]});
+
   const legendEl = document.getElementById('donut-garantia-legenda');
   if (legendEl) legendEl.innerHTML = [{ label:'Garantia', val:totalW, color:C.yellow },{ label:'Sem Garantia', val:totalNW, color:C.green },{ label:'Manutenção Paga', val:totalM, color:C.orange }].map(l => `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 10px;"><span style="width:10px;height:10px;border-radius:2px;background:${l.color};display:inline-block;"></span><span style="font-size:11px;color:var(--gray2);">${l.label} (${totalG>0?Math.round(l.val/totalG*100):0}% — ${l.val})</span></span>`).join('');
-  makeChart('chart-garantia-periodo', { type:'bar', data:{ labels:trimestres, datasets:[{ label:'Garantia', data:trimestres.map(t=>garantiaTrimestre[t]?.warranty||0), backgroundColor:C.yellow, borderRadius:2, stack:'g' },{ label:'Sem Garantia', data:trimestres.map(t=>garantiaTrimestre[t]?.noWarranty||0), backgroundColor:C.green, borderRadius:2, stack:'g' },{ label:'Manutenção Paga', data:trimestres.map(t=>garantiaTrimestre[t]?.maintenance||0), backgroundColor:C.orange, borderRadius:2, stack:'g' }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, color:C.white }}}, scales:{ x:{ stacked:true, ticks:{ color:C.gray2, maxRotation:45 }}, y:{ stacked:true, beginAtZero:true, ticks:{ color:C.gray2 }}}}, plugins:[segPlugin('G')]});
+
+  // ── Chamados por período (garantia) ──────────────────────────────
+  makeChart('chart-garantia-periodo', { type:'bar', data:{ labels:trimestres, datasets:[{ label:'Garantia', data:trimestres.map(t=>garantiaTrimFinal[t]?.warranty||0), backgroundColor:C.yellow, borderRadius:2, stack:'g' },{ label:'Sem Garantia', data:trimestres.map(t=>garantiaTrimFinal[t]?.noWarranty||0), backgroundColor:C.green, borderRadius:2, stack:'g' },{ label:'Manutenção Paga', data:trimestres.map(t=>garantiaTrimFinal[t]?.maintenance||0), backgroundColor:C.orange, borderRadius:2, stack:'g' }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, color:C.white }}}, scales:{ x:{ stacked:true, ticks:{ color:C.gray2, maxRotation:45 }}, y:{ stacked:true, beginAtZero:true, ticks:{ color:C.gray2 }}}}, plugins:[segPlugin('G')]});
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -474,7 +546,6 @@ function renderSlaReport() {
   }
   tblEl.innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:var(--gray2);">${Object.keys(deskHistory).length===0?'⏳ Carregando histórico de tickets...':'Sem dados para o período/filtro selecionado'}</td></tr>`;
 
-  // Histogramas
   const bucketLabels = ['0-1','1-2','2-4','4-6','6-8','8-10','10-12','12-14','14-16','16-18','18-20','20-22','22-24','24-26','26-28','28-30','30-32','32-34','34-36','36-38','38-40','40-48','48-100','100+'];
   function getBucket(d) { if(d<1)return 0;if(d<2)return 1;if(d<4)return 2;if(d<6)return 3;if(d<8)return 4;if(d<10)return 5;if(d<12)return 6;if(d<14)return 7;if(d<16)return 8;if(d<18)return 9;if(d<20)return 10;if(d<22)return 11;if(d<24)return 12;if(d<26)return 13;if(d<28)return 14;if(d<30)return 15;if(d<32)return 16;if(d<34)return 17;if(d<36)return 18;if(d<38)return 19;if(d<40)return 20;if(d<48)return 21;if(d<100)return 22;return 23; }
   const histData = {}; for (const g of grupos) histData[g] = new Array(bucketLabels.length).fill(0);
@@ -483,7 +554,6 @@ function renderSlaReport() {
   const histIds = { ENTRADA:'chart-hist-entrada', AVALIAÇÃO:'chart-hist-avaliacao', PAGAMENTO:'chart-hist-pagamento', TÉCNICO:'chart-hist-tecnico', DEVOLUÇÃO:'chart-hist-devolucao' };
   for (const g of grupos) { if (!document.getElementById(histIds[g])) continue; const dados=histData[g]||new Array(bucketLabels.length).fill(0); let last=dados.length-1; while(last>3&&dados[last]===0)last--; makeChart(histIds[g], { type:'bar', data:{ labels:bucketLabels.slice(0,last+2), datasets:[{ label:g, data:dados.slice(0,last+2), backgroundColor:histColors[g]||C.gray, borderRadius:3 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ display:false }}, scales:{ x:{ ticks:{ font:{ size:9 }, maxRotation:45 }}, y:{ beginAtZero:true, ticks:{ font:{ size:10 }}}}}}); }
 
-  // SLA por mês
   const slaByMonth = {};
   for (const h of histEntries) {
     const month = h.createdTime?.substring(0,7)||'N/A';
@@ -493,7 +563,6 @@ function renderSlaReport() {
   const months = Object.keys(slaByMonth).sort(), grupoColors = { ENTRADA:C.green, AVALIAÇÃO:C.blue, TÉCNICO:C.orange, PAGAMENTO:'#e0c052', DEVOLUÇÃO:C.purple };
   makeChart('chart-sla-mensal', { type:'bar', data:{ labels:months.map(m => { const[y,mo]=m.split('-'); return new Date(y,mo-1).toLocaleString('pt-BR',{month:'short',year:'2-digit'}); }), datasets:[...grupos.map(g => ({ label:g, data:months.map(m => { const v=slaByMonth[m]?.[g]; return v&&v.t>0?Math.round(v.d/v.t*100):null; }), backgroundColor:grupoColors[g], borderRadius:3 })),{ label:'Meta (80%)', data:months.map(()=>80), type:'line', borderColor:C.yellow, borderDash:[5,5], pointRadius:0, borderWidth:2, fill:false }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' }, datalabels:{ display:false }}, scales:{ x:{ ticks:{ maxRotation:45, minRotation:0 }}, y:{ beginAtZero:true, max:105, ticks:{ callback:v=>v+'%' }}}}});
 
-  // KPIs de SLA
   const allDentro=Object.values(statusMetrics).reduce((a,v)=>a+v.dentroSla,0), allTotal=Object.values(statusMetrics).reduce((a,v)=>a+v.ticketsUnicos.size,0), pctGeral=allTotal>0?Math.round(allDentro/allTotal*100):0;
   const elSlaGeral=document.getElementById('kpi-sla-geral'); if (elSlaGeral) { const color=pctGeral>=80?C.green:pctGeral>=50?C.orange:C.red; elSlaGeral.innerHTML=`<div class="val" style="color:${color}">${pctGeral}%</div><div class="lbl">% Conclusão SLA Geral</div>`; }
   const elSlaTickets=document.getElementById('kpi-sla-tickets'); if (elSlaTickets) elSlaTickets.innerHTML=`<div class="val">${total}</div><div class="lbl">Tickets com Histórico</div>`;
@@ -644,7 +713,7 @@ function renderSourceStatus(ds) {
   ].map(i => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--bg3);border-radius:4px;border:1px solid var(--border);"><div><div style="font-weight:600;font-size:13px;">${i.label}</div><div style="font-size:11px;color:var(--gray2);margin-top:2px;">${i.desc}</div></div><span class="ds-badge ${ds[i.key]?'ok':'missing'}">${ds[i.key]?'● Carregado':'○ Sem dados'}</span></div>`).join('');
 }
 
-// ── Drag and drop nas upload zones ───────────────────────────────────
+// ── Drag and drop ────────────────────────────────────────────────────
 ['rma','spare','sankhya'].forEach(type => {
   const zone = document.getElementById(`zone-${type}`); if (!zone) return;
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
