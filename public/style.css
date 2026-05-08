@@ -52,9 +52,22 @@ header {
 .refresh-btn { background: none; border: 1px solid var(--border); color: var(--gray2); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: var(--font); transition: all 0.2s; }
 .refresh-btn:hover { border-color: var(--yellow); color: var(--yellow); }
 
-/* ── Barra de período ──────────────────────── */
-.period-bar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 10px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.period-bar label { font-size: 12px; color: var(--gray2); }
+/* ── Barra de período — sticky abaixo do header */
+.period-bar {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 56px;       /* altura do header */
+  z-index: 99;
+  width: 100%;
+  box-sizing: border-box;
+}
+.period-bar label { font-size: 12px; color: var(--gray2); white-space: nowrap; }
 .period-bar input[type=date] { background: var(--bg3); border: 1px solid var(--border); color: var(--white); padding: 5px 10px; border-radius: 4px; font-family: var(--font); font-size: 13px; }
 .period-bar input[type=date]:focus { outline: none; border-color: var(--yellow); }
 .period-shortcuts { display: flex; gap: 6px; }
@@ -63,13 +76,52 @@ header {
 .period-shortcuts button.active { background: var(--yellow); color: var(--bg); border-color: var(--yellow); font-weight: 600; }
 .apply-btn { background: var(--yellow); border: none; color: var(--bg); padding: 6px 16px; border-radius: 4px; cursor: pointer; font-family: var(--fontc); font-size: 13px; font-weight: 700; letter-spacing: 0.5px; transition: opacity 0.2s; }
 .apply-btn:hover { opacity: 0.85; }
+
+/* Separador visual na period-bar */
+.period-bar-sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+
+/* Filtro de garantia inline na period-bar */
+.garantia-inline-label {
+  font-family: var(--fontc);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--gray2);
+  white-space: nowrap;
+}
+.garantia-inline-btns { display: flex; gap: 6px; flex-wrap: nowrap; }
+.garantia-inline-btns button {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--gray2);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.garantia-inline-btns button:hover { border-color: var(--yellow); color: var(--white); }
+.garantia-inline-btns button.active { background: var(--yellow); color: var(--bg); border-color: var(--yellow); font-weight: 600; }
+
 .data-status { display: flex; gap: 8px; margin-left: auto; }
 .ds-badge { font-size: 11px; padding: 3px 8px; border-radius: 3px; display: flex; align-items: center; gap: 4px; }
 .ds-badge.ok { background: rgba(82,200,120,0.15); color: var(--green); border: 1px solid rgba(82,200,120,0.3); }
 .ds-badge.missing { background: rgba(224,82,82,0.15); color: var(--red); border: 1px solid rgba(224,82,82,0.3); }
 
-/* ── Tabs ──────────────────────────────────── */
-.tabs { display: flex; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; overflow-x: hidden; }
+/* ── Tabs — sticky abaixo da period-bar ──────── */
+.tabs {
+  display: flex;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  overflow-x: hidden;
+  position: sticky;
+  top: 113px;      /* header (56) + period-bar (~57) */
+  z-index: 98;
+}
 .tab { padding: 12px 20px; font-family: var(--fontc); font-size: 14px; font-weight: 500; letter-spacing: 0.5px; color: var(--gray2); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; transition: all 0.2s; background: none; border-left: none; border-right: none; border-top: none; }
 .tab:hover { color: var(--white); }
 .tab.active { color: var(--yellow); border-bottom-color: var(--yellow); }
@@ -146,7 +198,7 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; over
 .section-header { font-family: var(--fontc); font-size: 20px; font-weight: 700; letter-spacing: 1px; color: var(--white); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
 .section-header::before { content: ''; display: inline-block; width: 3px; height: 20px; background: var(--yellow); border-radius: 2px; }
 
-/* ── Empty / loading ───────────────────────── */
+/* ── Empty ─────────────────────────────────── */
 .empty { text-align: center; padding: 40px; color: var(--gray2); }
 .empty .icon { font-size: 32px; margin-bottom: 8px; }
 .empty p { font-size: 13px; }
@@ -164,19 +216,11 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; over
 .hbar-fill { height: 100%; border-radius: 4px; background: var(--yellow); transition: width 0.6s ease; }
 .hbar-fill.red { background: var(--red); }
 
-/* ── Aba Produtos — filtro e painel unificado  */
-.produtos-filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 6px; flex-wrap: wrap; }
-.produtos-filter-bar label { font-family: var(--fontc); font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--gray2); }
-.filtro-garantia-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-.filtro-garantia-btns button { background: var(--bg3); border: 1px solid var(--border); color: var(--gray2); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: var(--font); transition: all 0.2s; }
-.filtro-garantia-btns button:hover { border-color: var(--yellow); color: var(--white); }
-.filtro-garantia-btns button.active { background: var(--yellow); color: var(--bg); border-color: var(--yellow); font-weight: 600; }
-
+/* ── Aba Produtos — painel unificado ─────────*/
 .produtos-unified-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
 .produtos-left-panel { border-right: 1px solid var(--border); padding: 16px; }
 .produtos-right-panel { padding: 16px; transition: border-left 0.2s; }
 .produtos-right-panel.has-selection { border-left: 3px solid var(--yellow); }
-
 .produtos-panel-title { font-family: var(--fontc); font-size: 13px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--gray2); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint-click { font-family: var(--font); font-size: 11px; font-weight: 400; color: var(--gray2); letter-spacing: 0; text-transform: none; margin-left: auto; }
 .selected-badge { font-family: var(--font); font-size: 11px; font-weight: 600; color: var(--yellow); letter-spacing: 0; text-transform: none; background: rgba(255,208,76,0.1); border: 1px solid rgba(255,208,76,0.25); padding: 2px 8px; border-radius: 3px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; margin-left: auto; }
@@ -205,21 +249,24 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; over
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .produtos-unified-grid { grid-template-columns: 1fr; }
   #histograma-grid { grid-template-columns: 1fr 1fr !important; }
+  .garantia-inline-btns { flex-wrap: wrap; }
 }
 @media (max-width: 600px) {
   #histograma-grid { grid-template-columns: 1fr !important; }
   header { padding: 0 12px; height: 48px; }
   header h1 { font-size: 14px; }
   .header-sep { display: none; }
+  .tabs { top: 105px; }
   main { padding: 12px; }
-  .period-bar { padding: 8px 12px; gap: 8px; }
-  .tabs { padding: 0 12px; }
+  .period-bar { padding: 8px 12px; gap: 8px; top: 48px; }
   .kpis { gap: 8px; }
   .kpi { min-width: 80px; padding: 10px 12px; }
   .kpi .val { font-size: 22px; }
   .panel { padding: 12px; }
   #clock { font-size: 13px; }
   .data-status { display: none; }
+  .period-bar-sep { display: none; }
+  .garantia-inline-label { display: none; }
 }
 @media (min-width: 901px) and (max-width: 1200px) {
   .grid3 { grid-template-columns: 1fr 1fr; }
