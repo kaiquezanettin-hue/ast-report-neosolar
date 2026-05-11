@@ -8,8 +8,152 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="style.css"/>
+  <style>
+  /* ── Login screen ── */
+  #login-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  .login-box {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 40px 48px;
+    width: 100%;
+    max-width: 380px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+  .login-box img { height: 36px; }
+  .login-box h2 {
+    font-family: var(--fontc);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--gray2);
+    text-transform: uppercase;
+    text-align: center;
+  }
+  .login-input-wrap { width: 100%; position: relative; }
+  .login-input-wrap input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--white);
+    padding: 10px 40px 10px 14px;
+    border-radius: 6px;
+    font-family: var(--font);
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s;
+    letter-spacing: 2px;
+  }
+  .login-input-wrap input:focus { border-color: var(--yellow); }
+  .login-input-wrap input.error { border-color: var(--red); animation: shake 0.3s; }
+  .login-toggle {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--gray2);
+    cursor: pointer;
+    font-size: 15px;
+    padding: 0;
+    line-height: 1;
+  }
+  .login-toggle:hover { color: var(--white); }
+  .login-btn {
+    width: 100%;
+    background: var(--yellow);
+    border: none;
+    color: var(--bg);
+    padding: 11px;
+    border-radius: 6px;
+    font-family: var(--fontc);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .login-btn:hover { opacity: 0.85; }
+  .login-error {
+    font-size: 12px;
+    color: var(--red);
+    text-align: center;
+    min-height: 16px;
+  }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25%      { transform: translateX(-6px); }
+    75%      { transform: translateX(6px); }
+  }
+  </style>
 </head>
 <body>
+
+<!-- ═══════════════════════════════════════════════
+     TELA DE LOGIN
+════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <img src="https://i.imgur.com/KkLKFkV.png" alt="NeoSolar" onerror="this.style.display='none'"/>
+    <h2>Report Assistência Técnica</h2>
+    <div class="login-input-wrap">
+      <input type="password" id="login-input" placeholder="Senha de acesso"
+        onkeydown="if(event.key==='Enter')doLogin()"/>
+      <button class="login-toggle" onclick="toggleLoginVis()" tabindex="-1" title="Mostrar/ocultar">👁</button>
+    </div>
+    <button class="login-btn" onclick="doLogin()">Entrar</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const SENHA = 'Neo@123456';
+  const SESSION_KEY = 'ast_auth';
+
+  function doLogin() {
+    const input = document.getElementById('login-input');
+    const err   = document.getElementById('login-error');
+    if (input.value === SENHA) {
+      sessionStorage.setItem(SESSION_KEY, '1');
+      document.getElementById('login-screen').style.display = 'none';
+      err.textContent = '';
+    } else {
+      input.classList.remove('error');
+      void input.offsetWidth;
+      input.classList.add('error');
+      err.textContent = 'Senha incorreta. Tente novamente.';
+      input.value = '';
+      input.focus();
+    }
+  }
+
+  function toggleLoginVis() {
+    const input = document.getElementById('login-input');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }
+
+  window.doLogin = doLogin;
+  window.toggleLoginVis = toggleLoginVis;
+
+  // Se já autenticado na sessão, esconde o login imediatamente
+  if (sessionStorage.getItem(SESSION_KEY) === '1') {
+    document.getElementById('login-screen').style.display = 'none';
+  }
+})();
+</script>
 
 <!-- ═══════════════════════════════════════════════
      HEADER
@@ -42,10 +186,8 @@
   </div>
   <button class="apply-btn" onclick="loadData()">Aplicar</button>
 
-  <!-- Separador -->
   <div class="period-bar-sep"></div>
 
-  <!-- Filtro de garantia — visível só na aba Produtos -->
   <span class="garantia-inline-label">Garantia</span>
   <div class="garantia-inline-btns" id="garantia-filter-bar">
     <button class="active" onclick="setProdGarantia('todos',this)">Todos</button>
@@ -105,7 +247,6 @@
 <div id="tab-produtos" class="tab-content">
   <div class="section-header">Análise de Produtos</div>
 
-  <!-- Gráficos linha / local de teste -->
   <div class="grid2">
     <div class="panel blue">
       <div class="panel-title">Entradas por Linha de Produto</div>
@@ -117,7 +258,6 @@
     </div>
   </div>
 
-  <!-- Painel unificado Top 10 + Defeitos -->
   <div class="produtos-unified-grid">
     <div class="produtos-left-panel">
       <div class="produtos-panel-title">
@@ -135,7 +275,6 @@
     </div>
   </div>
 
-  <!-- Grid 2x2 garantia + serviços -->
   <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:16px;margin-bottom:16px;">
     <div class="panel">
       <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
