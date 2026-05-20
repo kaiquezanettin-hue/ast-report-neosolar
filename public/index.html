@@ -10,86 +10,101 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="style.css"/>
   <style>
-  /* ── Login screen ── */
+  /* ── Login screen — idêntico ao Hub ── */
   #login-screen {
     position: fixed;
     inset: 0;
-    background: var(--bg);
+    background: #2c2e30;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 9999;
   }
   .login-box {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 40px 48px;
+    background: #383a3c;
+    border-radius: 16px;
+    padding: 48px 52px;
     width: 100%;
-    max-width: 380px;
+    max-width: 400px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 24px;
+    gap: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   }
-  .login-box svg { height: 44px; width: auto; }
-  .login-box h2 {
-    font-family: var(--fontc);
-    font-size: 16px;
-    font-weight: 600;
+  .login-logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .login-logo-wrap span {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: #FFD04C;
     letter-spacing: 1px;
-    color: var(--gray2);
+  }
+  .login-subtitle {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: #888;
     text-transform: uppercase;
     text-align: center;
+    margin-top: -8px;
   }
   .login-input-wrap { width: 100%; position: relative; }
   .login-input-wrap input {
     width: 100%;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    color: var(--white);
-    padding: 10px 40px 10px 14px;
-    border-radius: 6px;
-    font-family: var(--font);
+    background: #2c2e30;
+    border: 1.5px solid #4a4c4e;
+    color: #FFFDF0;
+    padding: 13px 44px 13px 16px;
+    border-radius: 8px;
+    font-family: 'Barlow', sans-serif;
     font-size: 15px;
     outline: none;
     transition: border-color 0.2s;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
   }
-  .login-input-wrap input:focus { border-color: var(--yellow); }
-  .login-input-wrap input.error { border-color: var(--red); animation: shake 0.3s; }
+  .login-input-wrap input::placeholder { color: #666; letter-spacing: 0; }
+  .login-input-wrap input:focus { border-color: #FFD04C; }
+  .login-input-wrap input.error { border-color: #e05252; animation: shake 0.3s; }
   .login-toggle {
     position: absolute;
-    right: 12px;
+    right: 14px;
     top: 50%;
     transform: translateY(-50%);
     background: none;
     border: none;
-    color: var(--gray2);
+    color: #666;
     cursor: pointer;
-    font-size: 15px;
+    font-size: 16px;
     padding: 0;
     line-height: 1;
   }
-  .login-toggle:hover { color: var(--white); }
+  .login-toggle:hover { color: #FFFDF0; }
   .login-btn {
     width: 100%;
-    background: var(--yellow);
+    background: #FFD04C;
     border: none;
-    color: var(--bg);
-    padding: 11px;
-    border-radius: 6px;
-    font-family: var(--fontc);
-    font-size: 15px;
+    color: #1c1e20;
+    padding: 13px;
+    border-radius: 8px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 16px;
     font-weight: 700;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
     cursor: pointer;
-    transition: opacity 0.2s;
+    transition: background 0.2s, transform 0.1s;
   }
-  .login-btn:hover { opacity: 0.85; }
+  .login-btn:hover { background: #e6b800; }
+  .login-btn:active { transform: scale(0.98); }
   .login-error {
     font-size: 12px;
-    color: var(--red);
+    color: #e05252;
     text-align: center;
     min-height: 16px;
   }
@@ -107,12 +122,15 @@
 ════════════════════════════════════════════════ -->
 <div id="login-screen">
   <div class="login-box">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 242.52 454.71" style="height:44px;width:auto;display:block;"><defs><style>.cls-1{fill:#ffd04c;}</style></defs><path class="cls-1" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="cls-1" x="2.12" width="24.92" height="71.6"/><rect class="cls-1" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="cls-1" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="cls-1" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="cls-1" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="cls-1" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="cls-1" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="cls-1" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="cls-1" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></svg><defs><style>.cls-1{fill:#ffd04c;}</style></defs><g><path class="cls-1" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="cls-1" x="2.12" width="24.92" height="71.6"/><rect class="cls-1" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="cls-1" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="cls-1" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="cls-1" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="cls-1" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="cls-1" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="cls-1" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="cls-1" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></g><g><path class="cls-1" d="M609.13,342.15h-43.27l-107.69-123.22v123.22h-55.83V117.52h42.62l108.35,126.52v-126.52h55.83v224.63Z"/><path class="cls-1" d="M805.69,276.74l.33.99h-114.3c4.29,14.53,15.53,25.77,36.01,25.77,11.23,0,19.82-4.29,24.44-11.57h52.86c-7.6,33.04-38.32,53.85-77.96,53.85-52.53,0-87.54-35.02-87.54-83.91s34.03-83.58,85.23-83.58c46.58,0,81.93,32.04,81.93,80.27,0,5.94,0,12.22-.99,18.17ZM691.06,246.35h65.41c-2.97-17.51-14.53-26.76-31.71-26.76-18.17,0-29.73,10.57-33.69,26.76Z"/><path class="cls-1" d="M1002.58,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM952.04,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.54,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="cls-1" d="M1216,187.22h-56.16c-2.97-16.85-13.54-28.41-36.34-28.41-19.16,0-32.04,7.93-32.04,22.46,0,12.22,8.92,17.51,25.76,21.14l31.38,7.27c40.96,8.92,67.72,25.44,67.72,64.09,0,44.93-37,73.01-93.15,73.01-50.55,0-96.13-23.79-101.42-79.28h55.83c3.63,19.82,20.81,31.71,47.24,31.71,20.81,0,31.71-7.6,31.71-19.82,0-7.6-4.63-15.53-23.79-19.16l-37-8.26c-44.27-9.58-65.08-30.39-65.08-66.07,0-44.93,36.34-73.34,89.19-73.34,36.34,0,90.51,14.21,96.13,74.66Z"/><path class="cls-1" d="M1413.22,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM1362.68,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.53,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="cls-1" d="M1495.15,342.15h-53.51V107.61h53.51v234.54Z"/><path class="cls-1" d="M1700.64,342.15h-53.51v-8.92c-11.89,7.6-26.43,12.22-43.94,12.22-43.27,0-79.61-36.01-79.61-83.58s36.34-83.58,79.61-83.58c17.51,0,32.04,4.63,43.94,12.22v-8.59h53.51v160.22ZM1647.12,286.65v-49.55c-9.91-11.56-21.47-15.19-33.37-15.19-21.8,0-37.66,17.84-37.66,39.97s15.86,39.64,37.66,39.64c11.89,0,23.46-3.3,33.37-14.86Z"/><path class="cls-1" d="M1845.66,230.16c-26.1.99-42.62,7.93-55.17,20.48v91.5h-53.51v-160.22h53.51v17.18c14.21-12.22,31.38-19.82,55.17-19.82v50.87Z"/></g></svg>
-    <h2>Report Assistência Técnica</h2>
+    <div class="login-logo-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 242.52 454.71" style="height:40px;width:auto;"><defs><style>.s{fill:#ffd04c;}</style></defs><path class="s" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="s" x="2.12" width="24.92" height="71.6"/><rect class="s" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="s" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="s" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="s" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="s" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="s" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="s" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="s" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></svg>
+      <span>NeoSolar</span>
+    </div>
+    <div class="login-subtitle">Acesso Restrito · Engenharia</div>
     <div class="login-input-wrap">
-      <input type="password" id="login-input" placeholder="Senha de acesso"
+      <input type="password" id="login-input" placeholder="Digite a senha"
         onkeydown="if(event.key==='Enter')doLogin()"/>
-      <button class="login-toggle" onclick="toggleLoginVis()" tabindex="-1" title="Mostrar/ocultar">👁</button>
+      <button class="login-toggle" onclick="toggleLoginVis()" tabindex="-1">👁</button>
     </div>
     <button class="login-btn" onclick="doLogin()">Entrar</button>
     <div class="login-error" id="login-error"></div>
@@ -123,7 +141,6 @@
 (function() {
   const SENHA = 'Neo@123456';
   const SESSION_KEY = 'ast_auth';
-
   function doLogin() {
     const input = document.getElementById('login-input');
     const err   = document.getElementById('login-error');
@@ -140,16 +157,12 @@
       input.focus();
     }
   }
-
   function toggleLoginVis() {
     const input = document.getElementById('login-input');
     input.type = input.type === 'password' ? 'text' : 'password';
   }
-
   window.doLogin = doLogin;
   window.toggleLoginVis = toggleLoginVis;
-
-  // Se já autenticado na sessão, esconde o login imediatamente
   if (sessionStorage.getItem(SESSION_KEY) === '1') {
     document.getElementById('login-screen').style.display = 'none';
   }
@@ -161,7 +174,7 @@
 ════════════════════════════════════════════════ -->
 <header>
   <div class="header-left">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1845.66 454.71" style="height:28px;width:auto;display:block;"><defs><style>.cls-1{fill:#ffd04c;}</style></defs><g><path class="cls-1" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="cls-1" x="2.12" width="24.92" height="71.6"/><rect class="cls-1" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="cls-1" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="cls-1" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="cls-1" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="cls-1" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="cls-1" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="cls-1" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="cls-1" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></g><g><path class="cls-1" d="M609.13,342.15h-43.27l-107.69-123.22v123.22h-55.83V117.52h42.62l108.35,126.52v-126.52h55.83v224.63Z"/><path class="cls-1" d="M805.69,276.74l.33.99h-114.3c4.29,14.53,15.53,25.77,36.01,25.77,11.23,0,19.82-4.29,24.44-11.57h52.86c-7.6,33.04-38.32,53.85-77.96,53.85-52.53,0-87.54-35.02-87.54-83.91s34.03-83.58,85.23-83.58c46.58,0,81.93,32.04,81.93,80.27,0,5.94,0,12.22-.99,18.17ZM691.06,246.35h65.41c-2.97-17.51-14.53-26.76-31.71-26.76-18.17,0-29.73,10.57-33.69,26.76Z"/><path class="cls-1" d="M1002.58,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM952.04,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.54,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="cls-1" d="M1216,187.22h-56.16c-2.97-16.85-13.54-28.41-36.34-28.41-19.16,0-32.04,7.93-32.04,22.46,0,12.22,8.92,17.51,25.76,21.14l31.38,7.27c40.96,8.92,67.72,25.44,67.72,64.09,0,44.93-37,73.01-93.15,73.01-50.55,0-96.13-23.79-101.42-79.28h55.83c3.63,19.82,20.81,31.71,47.24,31.71,20.81,0,31.71-7.6,31.71-19.82,0-7.6-4.63-15.53-23.79-19.16l-37-8.26c-44.27-9.58-65.08-30.39-65.08-66.07,0-44.93,36.34-73.34,89.19-73.34,36.34,0,90.51,14.21,96.13,74.66Z"/><path class="cls-1" d="M1413.22,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM1362.68,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.53,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="cls-1" d="M1495.15,342.15h-53.51V107.61h53.51v234.54Z"/><path class="cls-1" d="M1700.64,342.15h-53.51v-8.92c-11.89,7.6-26.43,12.22-43.94,12.22-43.27,0-79.61-36.01-79.61-83.58s36.34-83.58,79.61-83.58c17.51,0,32.04,4.63,43.94,12.22v-8.59h53.51v160.22ZM1647.12,286.65v-49.55c-9.91-11.56-21.47-15.19-33.37-15.19-21.8,0-37.66,17.84-37.66,39.97s15.86,39.64,37.66,39.64c11.89,0,23.46-3.3,33.37-14.86Z"/><path class="cls-1" d="M1845.66,230.16c-26.1.99-42.62,7.93-55.17,20.48v91.5h-53.51v-160.22h53.51v17.18c14.21-12.22,31.38-19.82,55.17-19.82v50.87Z"/></g></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1845.66 454.71" style="height:26px;width:auto;"><defs><style>.l{fill:#ffd04c;}</style></defs><g><path class="l" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="l" x="2.12" width="24.92" height="71.6"/><rect class="l" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="l" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="l" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="l" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="l" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="l" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="l" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="l" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></g><g><path class="l" d="M609.13,342.15h-43.27l-107.69-123.22v123.22h-55.83V117.52h42.62l108.35,126.52v-126.52h55.83v224.63Z"/><path class="l" d="M805.69,276.74l.33.99h-114.3c4.29,14.53,15.53,25.77,36.01,25.77,11.23,0,19.82-4.29,24.44-11.57h52.86c-7.6,33.04-38.32,53.85-77.96,53.85-52.53,0-87.54-35.02-87.54-83.91s34.03-83.58,85.23-83.58c46.58,0,81.93,32.04,81.93,80.27,0,5.94,0,12.22-.99,18.17ZM691.06,246.35h65.41c-2.97-17.51-14.53-26.76-31.71-26.76-18.17,0-29.73,10.57-33.69,26.76Z"/><path class="l" d="M1002.58,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM952.04,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.54,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="l" d="M1216,187.22h-56.16c-2.97-16.85-13.54-28.41-36.34-28.41-19.16,0-32.04,7.93-32.04,22.46,0,12.22,8.92,17.51,25.76,21.14l31.38,7.27c40.96,8.92,67.72,25.44,67.72,64.09,0,44.93-37,73.01-93.15,73.01-50.55,0-96.13-23.79-101.42-79.28h55.83c3.63,19.82,20.81,31.71,47.24,31.71,20.81,0,31.71-7.6,31.71-19.82,0-7.6-4.63-15.53-23.79-19.16l-37-8.26c-44.27-9.58-65.08-30.39-65.08-66.07,0-44.93,36.34-73.34,89.19-73.34,36.34,0,90.51,14.21,96.13,74.66Z"/><path class="l" d="M1413.22,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM1362.68,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.53,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="l" d="M1495.15,342.15h-53.51V107.61h53.51v234.54Z"/><path class="l" d="M1700.64,342.15h-53.51v-8.92c-11.89,7.6-26.43,12.22-43.94,12.22-43.27,0-79.61-36.01-79.61-83.58s36.34-83.58,79.61-83.58c17.51,0,32.04,4.63,43.94,12.22v-8.59h53.51v160.22ZM1647.12,286.65v-49.55c-9.91-11.56-21.47-15.19-33.37-15.19-21.8,0-37.66,17.84-37.66,39.97s15.86,39.64,37.66,39.64c11.89,0,23.46-3.3,33.37-14.86Z"/><path class="l" d="M1845.66,230.16c-26.1.99-42.62,7.93-55.17,20.48v91.5h-53.51v-160.22h53.51v17.18c14.21-12.22,31.38-19.82,55.17-19.82v50.87Z"/></g></svg>
     <span class="header-sep">/</span>
     <h1>REPORT ASSISTÊNCIA TÉCNICA</h1>
   </div>
