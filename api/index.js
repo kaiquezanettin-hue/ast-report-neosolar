@@ -550,5 +550,42 @@ app.get('/api/debug-ticket', async (req, res) => {
 });
 
 
+
+// ─── DEBUG: eventos de status do ticket ──────────────────────────────
+app.get('/api/debug-status-events', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+    const token = await getDeskToken();
+    await delay(150);
+    const r = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    const events = r.data.data || [];
+    // Filtra só eventos com mudança de Status
+    const statusEvents = [];
+    for (const e of events) {
+      if (!e.eventInfo) continue;
+      for (const info of e.eventInfo) {
+        if (info.propertyName !== 'Status') continue;
+        const val = info.propertyValue;
+        const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
+        const fromStatus = val?.previousValue || null;
+        statusEvents.push({
+          time: e.eventTime,
+          actor: e.actor,
+          toStatus,
+          fromStatus,
+          eventName: e.eventName
+        });
+      }
+    }
+    res.json({ total: events.length, statusChanges: statusEvents });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 module.exports = app;
