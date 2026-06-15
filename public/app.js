@@ -226,7 +226,7 @@ async function fetchDeskHistory(tickets) {
       const res = await fetch(`/api/desk-history?ticketId=${t.id}`);
       const data = await res.json();
       if (!data.error && data.statusTimes && Object.keys(data.statusTimes).length > 0) {
-        deskHistory[t.id] = { statusTimes: data.statusTimes, totalHours: t.totalHours||0, ticketNumber: t.ticketNumber, assigneeName: t.assigneeName, createdTime: t.createdTime, closedTime: t.closedTime||t.modifiedTime };
+        deskHistory[t.id] = { statusTimes: data.statusTimes, totalHours: t.totalHours||0, ticketNumber: t.ticketNumber, assigneeName: data.assigneeName || t.assigneeName || 'Sem agente', createdTime: data.createdTime || t.createdTime, closedTime: data.closedTime || t.closedTime || t.modifiedTime };
       }
     } catch {}
     processed++;
@@ -242,7 +242,7 @@ async function fetchDeskHistory(tickets) {
       const res = await fetch(`/api/desk-history?ticketNumber=${num}`);
       const data = await res.json();
       if (!data.error && data.statusTimes && Object.keys(data.statusTimes).length > 0) {
-        deskHistory[ck] = { statusTimes: data.statusTimes, totalHours: 0, ticketNumber: num, assigneeName: 'Sem agente', createdTime: data.createdTime||'', closedTime: data.closedTime||'' };
+        deskHistory[ck] = { statusTimes: data.statusTimes, totalHours: 0, ticketNumber: num, assigneeName: data.assigneeName || 'Sem agente', createdTime: data.createdTime||'', closedTime: data.closedTime||'' };
       }
     } catch {}
     processed++;
