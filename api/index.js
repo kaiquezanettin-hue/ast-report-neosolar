@@ -92,9 +92,7 @@ function getSlaStatus(status, hours) {
 app.get('/api/desk-page', async (req, res) => {
   try {
     const from = parseInt(req.query.from) || 0;
-    const statusFilter = req.query.status || ''; // 'closed' ou vazio para abertos
     const limit = 50;
-
     const token = await getDeskToken();
     const deptId = process.env.ZOHO_DEPT_ID;
 
@@ -105,13 +103,12 @@ app.get('/api/desk-page', async (req, res) => {
     );
 
     const allData = response.data.data || [];
-
     const tickets = allData.map(t => ({
       id: t.id,
       ticketNumber: t.ticketNumber,
       subject: t.subject,
       status: t.status,
-      assigneeName: t.assignee?.name || 'Sem agente',
+      assigneeName: t.assignee?.name || t.assigneeName || 'Sem agente',
       createdTime: t.createdTime,
       closedTime: t.closedTime || null,
       modifiedTime: t.modifiedTime,
@@ -141,12 +138,26 @@ app.get('/api/desk-history', async (req, res) => {
     const token = await getDeskToken();
     await delay(150);
 
-    const hist = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
+    // Busca histórico e dados do ticket em paralelo
+    const [histRes, ticketRes] = await Promise.all([
+      axios.get(
+        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+      ),
+      axios.get(
+        `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+      ).catch(() => null)
+    ]);
 
-    const events = hist.data.data || [];
+    // assigneeName do ticket
+    const assigneeName = ticketRes?.data?.assignee?.name
+      || ticketRes?.data?.assigneeName
+      || null;
+    const createdTime = ticketRes?.data?.createdTime || null;
+    const closedTime  = ticketRes?.data?.closedTime  || null;
+
+    const events = histRes.data.data || [];
     const statusChanges = [];
 
     for (const e of events) {
@@ -161,10 +172,8 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
 
-    // Sort by time
     statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
 
-    // Calculate time spent in each status (in business hours approximation)
     const statusTimes = {};
     for (let i = 0; i < statusChanges.length; i++) {
       const sName = statusChanges[i].status;
@@ -178,7 +187,7 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
 
-    res.json({ ticketId, statusTimes, statusChanges });
+    res.json({ ticketId, assigneeName, createdTime, closedTime, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
@@ -273,7 +282,7 @@ app.post('/api/stock-min', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── Report endpoint (usa tickets passados pelo frontend) ─────────────
+// ─── Report endpoint ──────────────────────────────────────────────────
 app.post('/api/report', async (req, res) => {
   try {
     const { from, to, tickets: allTickets = [] } = req.body;
@@ -286,7 +295,6 @@ app.post('/api/report', async (req, res) => {
       return d >= fromDate && d <= toDate;
     });
 
-    // SLA atual — abertos
     const slaByStatus = {}, technicians = {};
     for (const t of openTickets) {
       const slaS = getSlaStatus(t.status, t.hoursInCurrentStatus || 0);
@@ -299,7 +307,6 @@ app.post('/api/report', async (req, res) => {
       technicians[t.assigneeName][slaS]++;
     }
 
-    // Tendência mensal
     const monthlyTrend = {};
     for (const t of periodTickets) {
       const month = t.createdTime?.substring(0, 7) || 'N/A';
@@ -308,7 +315,6 @@ app.post('/api/report', async (req, res) => {
       if (t.closedTime) monthlyTrend[month].closed++;
     }
 
-    // Performance por técnico — fechados do período
     const closedPeriod = periodTickets.filter(t => t.closedTime);
     const avgTimeByAgent = {};
     for (const t of closedPeriod) {
@@ -317,16 +323,14 @@ app.post('/api/report', async (req, res) => {
       avgTimeByAgent[t.assigneeName].count++;
     }
 
-    // RMA
     const rmaCache = await getFromDb('rma', 'rma');
     const rma = (rmaCache.data || []).filter(r => {
       const d = new Date(r.testDate);
       return d >= fromDate && d <= toDate;
     });
 
-    // Spare Parts + Sankhya
-    const sankhyaCache = await getFromDb('sankhya', 'sankhya');
-    const sheetsCache = await getFromDb('spare_parts', 'sheets');
+    const sankhyaCache  = await getFromDb('sankhya', 'sankhya');
+    const sheetsCache   = await getFromDb('spare_parts', 'sheets');
     const stockMinCache = await getFromDb('stock_min', 'stockMin');
     const stockMins = stockMinCache.data || {};
     const spareParts = (sheetsCache.data || []).map(p => ({
@@ -334,7 +338,6 @@ app.post('/api/report', async (req, res) => {
       alert: p.quantidade <= (stockMins[p.sku] || 0) && (stockMins[p.sku] || 0) > 0
     }));
 
-    // RMA processing
     const productCount = {}, faultCount = {}, lineCount = {}, serviceCount = {};
     const warrantyCount = { warranty: 0, noWarranty: 0, noWarrantyMaint: 0 };
     const componentConsumption = {}, monthlyConsumption = {};
@@ -371,28 +374,23 @@ app.post('/api/report', async (req, res) => {
       }
     }
 
-    // Contagem NeoSolar (todos os registros do período)
     const testLocationCount = {};
     for (const r of rma) {
       const loc = (r.testLocation || 'Não informado').trim();
       testLocationCount[loc] = (testLocationCount[loc] || 0) + 1;
     }
 
-    const topProducts = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
-    const topFaults = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
+    const topProducts   = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
+    const topFaults     = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
     const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
-    // RMA raw para cruzamento com histórico Desk (apenas campos necessários)
-    // rmaRaw usa TODOS os registros (sem filtro de período) para cruzamento com histórico
+
     const rmaAllCache = await getFromDb('rma', 'rma');
     const rmaAll = rmaAllCache.data || [];
-    // Envia todos os campos do RMA para o frontend — evita problemas de campos faltando
     const rmaRaw = rmaAll;
-    const rmaRawFull = rmaAll; // mesmo que rmaRaw — todos os campos
+    const rmaRawFull = rmaAll;
 
-    // Dados trimestrais por serviço e garantia (usa addedTime, todos os registros)
     function getTrimestre(dateStr) {
       if (!dateStr) return null;
-      // Formato: "24-Apr-2026 12:04:10"
       const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
       const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
       if (m) {
@@ -408,7 +406,6 @@ app.post('/api/report', async (req, res) => {
       return null;
     }
 
-    // Parser de addedTime formato "24-Apr-2026 12:04:10"
     function parseAddedTime(dateStr) {
       if (!dateStr) return null;
       const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
@@ -418,7 +415,6 @@ app.post('/api/report', async (req, res) => {
       return isNaN(d) ? null : d;
     }
 
-    // Agrupamento dinâmico: mês para períodos curtos, trimestre para longos
     const diffDias = (toDate - fromDate) / (1000 * 60 * 60 * 24);
     const usarMes = diffDias <= 92;
 
@@ -426,7 +422,6 @@ app.post('/api/report', async (req, res) => {
       const trim = getTrimestre(dateStr);
       if (!trim) return null;
       if (usarMes) {
-        // Extrai mês/ano do addedTime
         const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
         const months = { Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12' };
         if (m) return `${months[m[2]]}/${m[3]}`;
@@ -437,10 +432,8 @@ app.post('/api/report', async (req, res) => {
       return trim;
     }
 
-    // trimestralData respeita o filtro from/to selecionado
     const trimestralData = {};
     for (const r of rmaAll) {
-      // Filtra pelo período selecionado usando addedTime
       const rDate = parseAddedTime(r.addedTime);
       if (!rDate || rDate < fromDate || rDate > toDate) continue;
       const periodo = getPeriodo(r.addedTime);
@@ -448,7 +441,6 @@ app.post('/api/report', async (req, res) => {
       if (!trimestralData[periodo]) trimestralData[periodo] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
       const svc = r.service || '';
       trimestralData[periodo].services[svc] = (trimestralData[periodo].services[svc] || 0) + 1;
-      // Local de teste
       const loc = (r.testLocation || 'Não informado').trim();
       if (!trimestralData[periodo]._locations) trimestralData[periodo]._locations = {};
       trimestralData[periodo]._locations[loc] = (trimestralData[periodo]._locations[loc] || 0) + 1;
@@ -457,7 +449,6 @@ app.post('/api/report', async (req, res) => {
       else if (v.includes('no warranty')) trimestralData[periodo].noWarranty++;
       else if (v.includes('warranty')) trimestralData[periodo].warranty++;
     }
-
 
     res.json({
       updatedAt: new Date().toISOString(),
@@ -472,7 +463,12 @@ app.post('/api/report', async (req, res) => {
         })).sort((a, b) => b.count - a.count),
         monthlyTrend
       },
-      rma: { total: rma.length, topProducts, topFaults, lineCount, serviceCount, warrantyCount, topComponents, monthlyConsumption, raw: rmaRaw, rawFull: rmaRawFull, trimestral: trimestralData, testLocation: testLocationCount },
+      rma: {
+        total: rma.length, topProducts, topFaults, lineCount, serviceCount,
+        warrantyCount, topComponents, monthlyConsumption,
+        raw: rmaRaw, rawFull: rmaRawFull,
+        trimestral: trimestralData, testLocation: testLocationCount
+      },
       spareParts,
       sankhya: (sankhyaCache.data || []).slice(0, 500),
       dataStatus: {
@@ -493,19 +489,15 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-
-
-
-
 // ─── Status ───────────────────────────────────────────────────────────
 app.get('/api/status', async (req, res) => {
-  const rma = await getFromDb('rma', 'rma');
+  const rma     = await getFromDb('rma', 'rma');
   const sankhya = await getFromDb('sankhya', 'sankhya');
-  const sheets = await getFromDb('spare_parts', 'sheets');
+  const sheets  = await getFromDb('spare_parts', 'sheets');
   res.json({
-    rma: { loaded: !!(rma.data), count: (rma.data || []).length, updatedAt: rma.updated_at },
+    rma:     { loaded: !!(rma.data),     count: (rma.data     || []).length, updatedAt: rma.updated_at },
     sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at },
-    sheets: { loaded: !!(sheets.data), count: (sheets.data || []).length, updatedAt: sheets.updated_at }
+    sheets:  { loaded: !!(sheets.data),  count: (sheets.data  || []).length, updatedAt: sheets.updated_at }
   });
 });
 
