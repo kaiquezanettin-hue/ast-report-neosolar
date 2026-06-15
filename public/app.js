@@ -88,6 +88,7 @@ function switchTab(id) {
   if (id === 'produtos' && window._lastReportData) setTimeout(() => renderProdutos(window._lastReportData), 80);
   if (id === 'sla' && typeof renderSlaReport === 'function') setTimeout(() => renderSlaReport(), 80);
   if (id === 'operacao' && window._lastReportData) setTimeout(() => renderOperacao(window._lastReportData), 80);
+  if (id === 'tecnicos') setTimeout(() => renderTecnicos(), 80);
 }
 
 // ── Chart.js — configuração global ──────────────────────────────────
@@ -739,6 +740,158 @@ function renderSourceStatus(ds) {
     if (file) { state.files[type]=file; const nameEl=document.getElementById(`fname-${type}`); if (nameEl) nameEl.textContent=file.name; }
   });
 });
+
+
+// ════════════════════════════════════════════════════════════════════
+// ABA: TÉCNICOS
+// Ticket "finalizado pelo técnico" = passou pelo status Aguardando laudo
+// Fonte: deskHistory[id].statusTimes["Aguardando laudo"] > 0
+// Técnico: deskHistory[id].assigneeName
+// ════════════════════════════════════════════════════════════════════
+function renderTecnicos() {
+  const from = new Date(document.getElementById('date-from').value);
+  const to   = new Date(document.getElementById('date-to').value); to.setHours(23,59,59);
+
+  // Coleta tickets que passaram por "Aguardando laudo" no período
+  const STATUS_FINALIZACAO = 'Aguardando laudo';
+  const tickets = [];
+
+  for (const h of Object.values(deskHistory)) {
+    if (!h.statusTimes || !h.statusTimes[STATUS_FINALIZACAO]) continue;
+    const criado = new Date(h.createdTime); if (criado < from || criado > to) continue;
+    const tecnico = (h.assigneeName || 'Sem agente').trim();
+    const horas   = h.statusTimes[STATUS_FINALIZACAO];
+    tickets.push({ ticket: h.ticketNumber, tecnico, horas, createdTime: h.createdTime });
+  }
+
+  if (!tickets.length) {
+    ['kpi-tecnicos','tbody-tecnicos','tbody-tecnicos-tickets'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguarde o histórico carregar ou sem dados no período</td></tr>';
+    });
+    document.getElementById('kpi-tecnicos').innerHTML = '<div style="color:var(--gray2);font-size:13px;padding:16px;">⏳ Aguarde o histórico de tickets carregar...</div>';
+    return;
+  }
+
+  // Agrega por técnico
+  const porTecnico = {};
+  for (const t of tickets) {
+    if (!porTecnico[t.tecnico]) porTecnico[t.tecnico] = [];
+    porTecnico[t.tecnico].push(t);
+  }
+  const tecnicos = Object.keys(porTecnico).sort();
+  const tecCores = [C.yellow, C.blue, C.green, C.orange, C.purple, C.red];
+
+  // ── KPIs ─────────────────────────────────────────────────────────
+  const kpiEl = document.getElementById('kpi-tecnicos');
+  kpiEl.innerHTML = [
+    { val: tickets.length, lbl: 'Total Finalizados no Período', cls: 'yellow' },
+    ...tecnicos.map((tec, i) => ({
+      val: porTecnico[tec].length,
+      lbl: tec,
+      cls: ['blue','green','orange','purple','red'][i % 5]
+    }))
+  ].map(k => `<div class="kpi ${k.cls}"><div class="val">${k.val}</div><div class="lbl">${k.lbl}</div></div>`).join('');
+
+  // ── Gráfico evolução mensal ───────────────────────────────────────
+  const mesesPT = { jan:0,fev:1,mar:2,abr:3,mai:4,jun:5,jul:6,ago:7,set:8,out:9,nov:10,dez:11 };
+  const mesesSet = new Set();
+  const porTecnicoMes = {};
+  for (const t of tickets) {
+    const d = new Date(t.createdTime);
+    const mes = d.toLocaleDateString('pt-BR', { month:'short', year:'2-digit' });
+    mesesSet.add(mes);
+    if (!porTecnicoMes[t.tecnico]) porTecnicoMes[t.tecnico] = {};
+    porTecnicoMes[t.tecnico][mes] = (porTecnicoMes[t.tecnico][mes] || 0) + 1;
+  }
+  const parseMesPT = s => { const [m,,a] = s.split(' '); return new Date(2000+parseInt(a), mesesPT[m] ?? 0); };
+  const meses = [...mesesSet].sort((a,b) => parseMesPT(a) - parseMesPT(b));
+
+  makeChart('chart-tecnicos-mensal', {
+    type: 'bar',
+    data: {
+      labels: meses,
+      datasets: tecnicos.map((tec, i) => ({
+        label: tec,
+        data: meses.map(m => porTecnicoMes[tec]?.[m] || 0),
+        backgroundColor: tecCores[i % tecCores.length],
+        borderRadius: 4
+      }))
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white }}},
+      scales: { x: { ticks: { color: C.gray2 }}, y: { beginAtZero: true, ticks: { color: C.gray2, stepSize: 1 }}}
+    }
+  });
+
+  // ── Donut distribuição ────────────────────────────────────────────
+  makeChart('chart-tecnicos-donut', {
+    type: 'doughnut',
+    data: {
+      labels: tecnicos,
+      datasets: [{ data: tecnicos.map(t => porTecnico[t].length), backgroundColor: tecCores.slice(0, tecnicos.length), borderWidth: 2, borderColor: C.bg2 }]
+    },
+    options: {
+      maintainAspectRatio: false, cutout: '60%',
+      centerText: { line1: tickets.length.toString(), line2: 'Total' },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white }}}
+    }
+  });
+
+  // ── Tabela resumo por técnico × período ───────────────────────────
+  const thead = document.getElementById('thead-tecnicos');
+  const tbody = document.getElementById('tbody-tecnicos');
+  thead.innerHTML = `<tr><th>Técnico</th>${meses.map(m => `<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr>`;
+  tbody.innerHTML = tecnicos.map((tec, i) => {
+    const cor = tecCores[i % tecCores.length];
+    const total = porTecnico[tec].length;
+    return `<tr>
+      <td style="font-weight:600;color:${cor};">${tec}</td>
+      ${meses.map(m => `<td class="num">${porTecnicoMes[tec]?.[m] || '—'}</td>`).join('')}
+      <td class="num" style="font-weight:700;color:${cor};">${total}</td>
+    </tr>`;
+  }).join('') + `<tr style="background:rgba(255,255,255,0.04);">
+    <td style="font-weight:600;color:var(--gray2);">Total</td>
+    ${meses.map(m => {
+      const tot = tecnicos.reduce((s,t) => s + (porTecnicoMes[t]?.[m] || 0), 0);
+      return `<td class="num" style="font-weight:600;">${tot || '—'}</td>`;
+    }).join('')}
+    <td class="num" style="font-weight:700;color:var(--yellow);">${tickets.length}</td>
+  </tr>`;
+
+  // ── Select de filtro de técnico ───────────────────────────────────
+  const sel = document.getElementById('filtro-tecnico');
+  const selVal = sel.value;
+  sel.innerHTML = '<option value="">Todos os técnicos</option>' + tecnicos.map(t => `<option value="${t}">${t}</option>`).join('');
+  sel.value = selVal;
+
+  // ── Tabela tickets individuais ────────────────────────────────────
+  const filtroTec = sel.value;
+  const ticketsFiltrados = filtroTec ? tickets.filter(t => t.tecnico === filtroTec) : tickets;
+  ticketsFiltrados.sort((a,b) => new Date(b.createdTime) - new Date(a.createdTime));
+
+  // Buscar produto via rmaByDesk
+  const rmaByDesk = {};
+  for (const r of window._rmaRawFull || window._rmaRaw || []) {
+    const num = String(r.deskNum || '').trim(); if (num && num !== '0') rmaByDesk[num] = r;
+  }
+
+  document.getElementById('tbody-tecnicos-tickets').innerHTML = ticketsFiltrados.slice(0, 300).map(t => {
+    const rma = rmaByDesk[String(t.ticket)];
+    const produto = rma?.model || '—';
+    const dataStr = t.createdTime ? new Date(t.createdTime).toLocaleDateString('pt-BR') : '—';
+    const i = tecnicos.indexOf(t.tecnico);
+    const cor = tecCores[i >= 0 ? i % tecCores.length : 0];
+    return `<tr>
+      <td><strong>#${t.ticket}</strong></td>
+      <td style="color:${cor};font-weight:600;">${t.tecnico}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${produto}">${produto}</td>
+      <td class="num">${dataStr}</td>
+      <td class="num">${t.horas.toFixed(1)}h</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--gray2);padding:20px;">Sem dados</td></tr>';
+}
 
 // ── Init ─────────────────────────────────────────────────────────────
 // Esconde filtro de garantia — só aparece na aba Produtos
