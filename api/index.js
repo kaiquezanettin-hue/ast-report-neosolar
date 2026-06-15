@@ -168,17 +168,8 @@ app.get('/api/desk-history', async (req, res) => {
     for (const e of events) {
       if (!e.eventInfo) continue;
 
-      // Captura o performer deste evento (quem fez a ação)
-      // O Zoho pode retornar em vários campos — tenta todos
-      const performer =
-        e.performer?.name ||
-        e.performer?.firstName ||
-        e.performerName ||
-        e.actorName ||
-        e.agent?.name ||
-        e.operator?.name ||
-        (e.performer ? JSON.stringify(e.performer) : null) ||
-        null;
+      // Captura o actor deste evento (quem fez a ação)
+      const performer = e.actor?.name || null;
 
       for (const info of e.eventInfo) {
         if (info.propertyName !== 'Status') continue;
@@ -218,20 +209,6 @@ app.get('/api/desk-history', async (req, res) => {
       statusPerformer['Em teste'] ||
       null;
 
-    // Log do primeiro evento para debug (remover após validar)
-    if (events.length > 0) {
-      const s = events[0];
-      console.log('HISTORY-EVENT-KEYS:', Object.keys(s));
-      console.log('HISTORY-PERFORMER-RAW:', JSON.stringify({
-        performer: s.performer,
-        performerName: s.performerName,
-        actorName: s.actorName,
-        agent: s.agent,
-        operator: s.operator,
-      }));
-    }
-
-    res.json({ ticketId, assigneeName, statusPerformer, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
@@ -572,42 +549,6 @@ app.get('/api/debug-ticket', async (req, res) => {
   }
 });
 
-
-// ─── DEBUG: ticket bruto completo ────────────────────────────────────
-app.get('/api/debug-raw', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-    const token = await getDeskToken();
-    await delay(150);
-    // Tenta com vários includes
-    const r = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee,contacts,team,owner`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-    res.json(r.data); // retorna tudo bruto
-  } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data });
-  }
-});
-
-// ─── DEBUG: histórico bruto completo ─────────────────────────────────
-app.get('/api/debug-history-raw', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-    const token = await getDeskToken();
-    await delay(150);
-    const r = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-    // Retorna os primeiros 3 eventos brutos completos
-    res.json({ total: r.data.data?.length, sample: r.data.data?.slice(0, 3) });
-  } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data });
-  }
-});
 
 app.use(express.static(path.join(__dirname, '../public')));
 module.exports = app;
