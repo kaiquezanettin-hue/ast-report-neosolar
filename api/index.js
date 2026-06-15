@@ -103,12 +103,28 @@ app.get('/api/desk-page', async (req, res) => {
     );
 
     const allData = response.data.data || [];
+
+    // DEBUG: logar estrutura do primeiro ticket para inspecionar campos de agente
+    if (allData.length > 0 && parseInt(req.query.from) === 0) {
+      const sample = allData[0];
+      console.log('DESK-PAGE DEBUG ticket keys:', Object.keys(sample));
+      console.log('DESK-PAGE DEBUG assignee field:', JSON.stringify({
+        assignee: sample.assignee,
+        assigneeName: sample.assigneeName,
+        assigneeId: sample.assigneeId,
+        agent: sample.agent,
+        agentId: sample.agentId,
+        owner: sample.owner,
+        ownerId: sample.ownerId,
+      }));
+    }
+
     const tickets = allData.map(t => ({
       id: t.id,
       ticketNumber: t.ticketNumber,
       subject: t.subject,
       status: t.status,
-      assigneeName: t.assignee?.name || t.assigneeName || 'Sem agente',
+      assigneeName: t.assignee?.name || t.assignee?.firstName || t.assigneeName || t.agent?.name || t.owner?.name || 'Sem agente',
       createdTime: t.createdTime,
       closedTime: t.closedTime || null,
       modifiedTime: t.modifiedTime,
@@ -499,6 +515,33 @@ app.get('/api/status', async (req, res) => {
     sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at },
     sheets:  { loaded: !!(sheets.data),  count: (sheets.data  || []).length, updatedAt: sheets.updated_at }
   });
+});
+
+
+// ─── DEBUG: ver estrutura bruta de um ticket ─────────────────────────
+app.get('/api/debug-ticket', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+    const token = await getDeskToken();
+    await delay(150);
+    const r = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee,contacts,team`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    // Retorna o objeto completo para inspecionar os campos
+    res.json({
+      id: r.data.id,
+      ticketNumber: r.data.ticketNumber,
+      assignee: r.data.assignee,
+      assigneeName: r.data.assigneeName,
+      assigneeId: r.data.assigneeId,
+      allKeys: Object.keys(r.data),
+      raw: r.data
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message, detail: e.response?.data });
+  }
 });
 
 app.use(express.static(path.join(__dirname, '../public')));
