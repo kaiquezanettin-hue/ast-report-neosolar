@@ -154,54 +154,42 @@ app.get('/api/desk-history', async (req, res) => {
     const token = await getDeskToken();
     await delay(150);
 
-    // Busca histórico e dados do ticket em paralelo
-    const [histRes, ticketRes] = await Promise.all([
-      axios.get(
-        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      ),
-      axios.get(
-        `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      ).catch(() => null)
-    ]);
-
-    // assigneeName do ticket
-    const assigneeName = ticketRes?.data?.assignee?.name
-      || ticketRes?.data?.assigneeName
-      || null;
-    const createdTime = ticketRes?.data?.createdTime || null;
-    const closedTime  = ticketRes?.data?.closedTime  || null;
+    const histRes = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
 
     const events = histRes.data.data || [];
-
-    // DEBUG: logar estrutura do primeiro evento para inspecionar campos de performer
-    if (events.length > 0) {
-      const sample = events[0];
-      console.log('DESK-HISTORY DEBUG event keys:', Object.keys(sample));
-      console.log('DESK-HISTORY DEBUG performer fields:', JSON.stringify({
-        performer: sample.performer,
-        performerId: sample.performerId,
-        performerName: sample.performerName,
-        actor: sample.actor,
-        actorName: sample.actorName,
-        agentId: sample.agentId,
-        agent: sample.agent,
-        operatorName: sample.operatorName,
-        by: sample.by,
-      }));
-    }
-
     const statusChanges = [];
+
+    // Mapa: status -> nome do agente que fez a transição para ele
+    const statusPerformer = {};
 
     for (const e of events) {
       if (!e.eventInfo) continue;
+
+      // Captura o performer deste evento (quem fez a ação)
+      // O Zoho pode retornar em vários campos — tenta todos
+      const performer =
+        e.performer?.name ||
+        e.performer?.firstName ||
+        e.performerName ||
+        e.actorName ||
+        e.agent?.name ||
+        e.operator?.name ||
+        (e.performer ? JSON.stringify(e.performer) : null) ||
+        null;
+
       for (const info of e.eventInfo) {
         if (info.propertyName !== 'Status') continue;
         const val = info.propertyValue;
         const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
         if (toStatus) {
-          statusChanges.push({ status: toStatus, time: e.eventTime });
+          statusChanges.push({ status: toStatus, time: e.eventTime, performer });
+          // Guarda quem fez a transição para este status
+          if (performer && !statusPerformer[toStatus]) {
+            statusPerformer[toStatus] = performer;
+          }
         }
       }
     }
@@ -221,7 +209,29 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
 
-    res.json({ ticketId, assigneeName, createdTime, closedTime, statusTimes, statusChanges });
+    // Técnico = quem fez a transição para "Aguardando laudo"
+    // Fallback: quem fez "Em manutenção" ou "Em teste"
+    const assigneeName =
+      statusPerformer['Aguardando laudo'] ||
+      statusPerformer['Em manutençao'] ||
+      statusPerformer['Em manutenção'] ||
+      statusPerformer['Em teste'] ||
+      null;
+
+    // Log do primeiro evento para debug (remover após validar)
+    if (events.length > 0) {
+      const s = events[0];
+      console.log('HISTORY-EVENT-KEYS:', Object.keys(s));
+      console.log('HISTORY-PERFORMER-RAW:', JSON.stringify({
+        performer: s.performer,
+        performerName: s.performerName,
+        actorName: s.actorName,
+        agent: s.agent,
+        operator: s.operator,
+      }));
+    }
+
+    res.json({ ticketId, assigneeName, statusPerformer, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
@@ -557,6 +567,43 @@ app.get('/api/debug-ticket', async (req, res) => {
       allKeys: Object.keys(r.data),
       raw: r.data
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message, detail: e.response?.data });
+  }
+});
+
+
+// ─── DEBUG: ticket bruto completo ────────────────────────────────────
+app.get('/api/debug-raw', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+    const token = await getDeskToken();
+    await delay(150);
+    // Tenta com vários includes
+    const r = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee,contacts,team,owner`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    res.json(r.data); // retorna tudo bruto
+  } catch (e) {
+    res.status(500).json({ error: e.message, detail: e.response?.data });
+  }
+});
+
+// ─── DEBUG: histórico bruto completo ─────────────────────────────────
+app.get('/api/debug-history-raw', async (req, res) => {
+  try {
+    const { ticketId } = req.query;
+    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+    const token = await getDeskToken();
+    await delay(150);
+    const r = await axios.get(
+      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    // Retorna os primeiros 3 eventos brutos completos
+    res.json({ total: r.data.data?.length, sample: r.data.data?.slice(0, 3) });
   } catch (e) {
     res.status(500).json({ error: e.message, detail: e.response?.data });
   }
