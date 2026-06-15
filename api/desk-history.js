@@ -1,5 +1,4 @@
 const axios = require('axios');
-
 let zohoToken = { access_token: null, expires_at: 0 };
 
 async function getDeskToken() {
@@ -71,14 +70,22 @@ async function getHistoryById(ticketId, token) {
 
 module.exports = async (req, res) => {
   const { ticketId, ticketNumber } = req.query;
-
   try {
     const token = await getDeskToken();
 
-    // Modo 1: ticketId direto
+    // Modo 1: ticketId direto — busca detalhes do ticket para pegar assigneeName
     if (ticketId) {
-      const result = await getHistoryById(ticketId, token);
-      return res.json({ ticketId, ...result });
+      const [result, ticketRes] = await Promise.all([
+        getHistoryById(ticketId, token),
+        axios.get(
+          `https://desk.zoho.com/api/v1/tickets/${ticketId}`,
+          { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+        ).catch(() => null)
+      ]);
+      const assigneeName = ticketRes?.data?.assignee?.name || ticketRes?.data?.assigneeName || null;
+      const createdTime  = ticketRes?.data?.createdTime  || null;
+      const closedTime   = ticketRes?.data?.closedTime   || null;
+      return res.json({ ticketId, assigneeName, createdTime, closedTime, ...result });
     }
 
     // Modo 2: busca por ticketNumber via Search API
@@ -92,11 +99,12 @@ module.exports = async (req, res) => {
       if (tickets.length === 0) {
         return res.json({ ticketNumber, found: false, statusTimes: {}, statusChanges: [] });
       }
-      const id = tickets[0].id;
-      const createdTime = tickets[0].createdTime;
-      const closedTime = tickets[0].closedTime || null;
+      const id           = tickets[0].id;
+      const createdTime  = tickets[0].createdTime  || null;
+      const closedTime   = tickets[0].closedTime   || null;
+      const assigneeName = tickets[0].assignee?.name || tickets[0].assigneeName || null;
       const result = await getHistoryById(id, token);
-      return res.json({ ticketId: id, ticketNumber, createdTime, closedTime, ...result });
+      return res.json({ ticketId: id, ticketNumber, createdTime, closedTime, assigneeName, ...result });
     }
 
     res.status(400).json({ error: 'ticketId or ticketNumber required' });
