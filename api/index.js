@@ -174,6 +174,24 @@ app.get('/api/desk-history', async (req, res) => {
     const closedTime  = ticketRes?.data?.closedTime  || null;
 
     const events = histRes.data.data || [];
+
+    // DEBUG: logar estrutura do primeiro evento para inspecionar campos de performer
+    if (events.length > 0) {
+      const sample = events[0];
+      console.log('DESK-HISTORY DEBUG event keys:', Object.keys(sample));
+      console.log('DESK-HISTORY DEBUG performer fields:', JSON.stringify({
+        performer: sample.performer,
+        performerId: sample.performerId,
+        performerName: sample.performerName,
+        actor: sample.actor,
+        actorName: sample.actorName,
+        agentId: sample.agentId,
+        agent: sample.agent,
+        operatorName: sample.operatorName,
+        by: sample.by,
+      }));
+    }
+
     const statusChanges = [];
 
     for (const e of events) {
