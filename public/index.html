@@ -223,6 +223,7 @@
   <button class="tab"        onclick="switchTab('operacao')">⚙️ Operação</button>
   <button class="tab"        onclick="switchTab('importacoes')">🔩 Importações</button>
   <button class="tab"        onclick="switchTab('sla')">📊 SLA & Lead Time</button>
+  <button class="tab"        onclick="switchTab('tecnicos')">👨‍🔧 Técnicos</button>
   <button class="tab"        onclick="switchTab('dados')">📁 Dados</button>
 </div>
 
@@ -525,6 +526,61 @@
     </div>
   </div>
 </div><!-- /tab-dados -->
+
+
+<!-- ═══ ABA: TÉCNICOS ═══ -->
+<div id="tab-tecnicos" class="tab-content">
+  <div class="section-header">Performance dos Técnicos</div>
+
+  <!-- KPIs -->
+  <div class="kpis" id="kpi-tecnicos"></div>
+
+  <!-- Gráfico evolução mensal -->
+  <div class="panel yellow" style="margin-bottom:16px;">
+    <div class="panel-title">Tickets Finalizados por Técnico <span>evolução mensal</span></div>
+    <div style="position:relative;height:320px;"><canvas id="chart-tecnicos-mensal"></canvas></div>
+  </div>
+
+  <div class="grid2">
+    <!-- Gráfico donut distribuição -->
+    <div class="panel blue">
+      <div class="panel-title">Distribuição no Período <span>% por técnico</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-donut"></canvas></div>
+    </div>
+
+    <!-- Tabela detalhada -->
+    <div class="panel">
+      <div class="panel-title">Detalhamento por Técnico e Período</div>
+      <div style="overflow-x:auto;">
+        <table class="tbl" id="tbl-tecnicos" style="width:100%;">
+          <thead id="thead-tecnicos"></thead>
+          <tbody id="tbody-tecnicos"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabela de tickets individuais -->
+  <div class="panel">
+    <div class="panel-title">Tickets Finalizados — Detalhes
+      <span style="margin-left:auto;">status: Aguardando laudo</span>
+    </div>
+    <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="filtro-tecnico" onchange="renderTecnicos()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:5px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+        <option value="">Todos os técnicos</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+      <table class="tbl" id="tbl-tecnicos-tickets" style="width:100%;font-size:12px;">
+        <thead><tr>
+          <th>Ticket #</th><th>Técnico</th><th>Produto</th>
+          <th class="num">Entrada no Status</th><th class="num">Horas no Status</th>
+        </tr></thead>
+        <tbody id="tbody-tecnicos-tickets"></tbody>
+      </table>
+    </div>
+  </div>
+</div><!-- /tab-tecnicos -->
 
 </main>
 
