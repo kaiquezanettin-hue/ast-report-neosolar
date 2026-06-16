@@ -175,22 +175,21 @@ app.get('/api/desk-history', async (req, res) => {
     ]);
 
     const statusChanges = [];
-    const statusPerformer = {};
+    const timeEntriesPorAgente = {};
+    const EXCLUIR_AGENTES = new Set(['Assistência técnica', 'Sem agente', 'Blueprint', '']);
 
     for (const e of allEvents) {
+      // Conta entradas de tempo por agente — técnico é quem tem mais entradas
+      if (e.eventName === 'TimeEntryAdded' && e.actor?.name && !EXCLUIR_AGENTES.has(e.actor.name)) {
+        timeEntriesPorAgente[e.actor.name] = (timeEntriesPorAgente[e.actor.name] || 0) + 1;
+      }
       if (!e.eventInfo) continue;
-      // actor.name = quem executou a ação neste evento
-      const performer = e.actor?.name || null;
       for (const info of e.eventInfo) {
         if (info.propertyName !== 'Status') continue;
         const val = info.propertyValue;
         const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
         if (toStatus && !STATUS_IGNORADOS.has(toStatus)) {
-          statusChanges.push({ status: toStatus, time: e.eventTime, performer });
-          // Guarda o primeiro actor humano que fez a transição para cada status
-          if (performer && !statusPerformer[toStatus]) {
-            statusPerformer[toStatus] = performer;
-          }
+          statusChanges.push({ status: toStatus, time: e.eventTime });
         }
       }
     }
@@ -210,16 +209,11 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
 
-    // Técnico = quem fez a transição para "Aguardando laudo"
-    // Fallback em cascata para outros status técnicos
-    const assigneeName =
-      statusPerformer['Aguardando laudo'] ||
-      statusPerformer['Em manutençao'] ||
-      statusPerformer['Em manutenção'] ||
-      statusPerformer['Em teste'] ||
-      null;
+    // Técnico = agente com mais entradas de tempo no ticket
+    const tecnicos = Object.entries(timeEntriesPorAgente).sort((a, b) => b[1] - a[1]);
+    const assigneeName = tecnicos.length > 0 ? tecnicos[0][0] : null;
 
-    res.json({ ticketId, assigneeName, statusPerformer, statusTimes, statusChanges });
+    res.json({ ticketId, assigneeName, timeEntriesPorAgente, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
