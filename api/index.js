@@ -152,32 +152,42 @@ app.get('/api/desk-history', async (req, res) => {
     if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
 
     const token = await getDeskToken();
-    await delay(150);
 
-    const histRes = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
+    // Paginação completa — Zoho retorna no máximo 50 eventos por vez
+    let allEvents = [];
+    let from = 0;
+    while (true) {
+      await delay(100);
+      const histRes = await axios.get(
+        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=50&from=${from}`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+      );
+      const batch = histRes.data.data || [];
+      allEvents = allEvents.concat(batch);
+      if (batch.length < 50) break;
+      from += 50;
+    }
 
-    const events = histRes.data.data || [];
+    const STATUS_IGNORADOS = new Set([
+      'Aguardando Chegada de Produto na Neosolar',
+      'Descarte', 'Produto despachado AST', 'Produto despachado',
+      'Aguardando Prazo / Autorização Descarte', 'Ag. Prazo / Autorização Descarte'
+    ]);
+
     const statusChanges = [];
-
-    // Mapa: status -> nome do agente que fez a transição para ele
     const statusPerformer = {};
 
-    for (const e of events) {
+    for (const e of allEvents) {
       if (!e.eventInfo) continue;
-
-      // Captura o actor deste evento (quem fez a ação)
+      // actor.name = quem executou a ação neste evento
       const performer = e.actor?.name || null;
-
       for (const info of e.eventInfo) {
         if (info.propertyName !== 'Status') continue;
         const val = info.propertyValue;
         const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-        if (toStatus) {
+        if (toStatus && !STATUS_IGNORADOS.has(toStatus)) {
           statusChanges.push({ status: toStatus, time: e.eventTime, performer });
-          // Guarda quem fez a transição para este status
+          // Guarda o primeiro actor humano que fez a transição para cada status
           if (performer && !statusPerformer[toStatus]) {
             statusPerformer[toStatus] = performer;
           }
@@ -201,7 +211,7 @@ app.get('/api/desk-history', async (req, res) => {
     }
 
     // Técnico = quem fez a transição para "Aguardando laudo"
-    // Fallback: quem fez "Em manutenção" ou "Em teste"
+    // Fallback em cascata para outros status técnicos
     const assigneeName =
       statusPerformer['Aguardando laudo'] ||
       statusPerformer['Em manutençao'] ||
@@ -209,6 +219,7 @@ app.get('/api/desk-history', async (req, res) => {
       statusPerformer['Em teste'] ||
       null;
 
+    res.json({ ticketId, assigneeName, statusPerformer, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
@@ -550,42 +561,6 @@ app.get('/api/debug-ticket', async (req, res) => {
 });
 
 
-
-// ─── DEBUG: eventos de status do ticket ──────────────────────────────
-app.get('/api/debug-status-events', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-    const token = await getDeskToken();
-    await delay(150);
-    const r = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}/History`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-    const events = r.data.data || [];
-    // Filtra só eventos com mudança de Status
-    const statusEvents = [];
-    for (const e of events) {
-      if (!e.eventInfo) continue;
-      for (const info of e.eventInfo) {
-        if (info.propertyName !== 'Status') continue;
-        const val = info.propertyValue;
-        const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-        const fromStatus = val?.previousValue || null;
-        statusEvents.push({
-          time: e.eventTime,
-          actor: e.actor,
-          toStatus,
-          fromStatus,
-          eventName: e.eventName
-        });
-      }
-    }
-    res.json({ total: events.length, statusChanges: statusEvents });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 app.use(express.static(path.join(__dirname, '../public')));
 module.exports = app;
