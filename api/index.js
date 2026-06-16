@@ -176,36 +176,37 @@ app.get('/api/desk-history', async (req, res) => {
 
     const TECNICOS_AST = ['marcos miceli', 'nathan magri', 'wendel correa', 'marcos', 'nathan', 'wendel'];
     const statusChanges = [];
+    // Mapa de proprietário por timestamp: { time, owner }
+    const ownerChanges = [];
     let passouPorLaudo = false;
-    let ultimoTecnicoComentou = null; // último técnico que comentou no ticket
 
-    // allEvents vem do Zoho em ordem decrescente (mais recente primeiro)
-    // Percorre em ordem cronológica inversa para pegar o ÚLTIMO comentário de técnico
     for (const e of allEvents) {
-      const actorNome = e.actor?.name || '';
-      const actorLower = actorNome.toLowerCase();
-      const eTecnico = TECNICOS_AST.some(t => actorLower.includes(t));
-
-      // Registra comentário de técnico — como eventos vêm do mais recente,
-      // o primeiro que encontrarmos já é o mais recente
-      if (eTecnico && e.eventName === 'CommentAdded' && !ultimoTecnicoComentou) {
-        ultimoTecnicoComentou = actorNome;
-      }
-
       if (!e.eventInfo) continue;
       for (const info of e.eventInfo) {
-        if (info.propertyName !== 'Status') continue;
-        const val = info.propertyValue;
-        const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-        if (!toStatus) continue;
-        if (toStatus === 'Aguardando laudo') passouPorLaudo = true;
-        if (!STATUS_IGNORADOS.has(toStatus)) {
-          statusChanges.push({ status: toStatus, time: e.eventTime });
+        // Captura mudanças de Status
+        if (info.propertyName === 'Status') {
+          const val = info.propertyValue;
+          const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
+          if (!toStatus) continue;
+          if (toStatus === 'Aguardando laudo') passouPorLaudo = true;
+          if (!STATUS_IGNORADOS.has(toStatus)) {
+            statusChanges.push({ status: toStatus, time: e.eventTime });
+          }
+        }
+        // Captura mudanças de Owner/Proprietário
+        if (info.propertyName === 'Owner' || info.propertyName === 'Assignee' ||
+            info.propertyName === 'ownerId' || info.propertyName === 'assigneeId') {
+          const val = info.propertyValue;
+          const newOwner = val?.updatedValue || val?.name || (typeof val === 'string' ? val : null);
+          if (newOwner) {
+            ownerChanges.push({ owner: newOwner, time: e.eventTime });
+          }
         }
       }
     }
 
     statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
+    ownerChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
 
     const statusTimes = {};
     for (let i = 0; i < statusChanges.length; i++) {
@@ -220,11 +221,37 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
 
-    // Técnico = último técnico AST que comentou no ticket,
-    // mas só conta se o ticket passou por "Aguardando laudo"
-    const assigneeName = (passouPorLaudo && ultimoTecnicoComentou) ? ultimoTecnicoComentou : null;
+    // Encontra quem era o proprietário quando o ticket entrou em "Aguardando laudo"
+    let assigneeName = null;
+    if (passouPorLaudo) {
+      // Acha o timestamp da entrada em "Aguardando laudo"
+      const laudoEvent = statusChanges.find(s => s.status === 'Aguardando laudo');
+      if (laudoEvent && ownerChanges.length > 0) {
+        // Pega o proprietário mais recente ANTES ou NO MOMENTO do laudo
+        const laudoTime = new Date(laudoEvent.time);
+        const ownerNoLaudo = ownerChanges
+          .filter(o => new Date(o.time) <= laudoTime)
+          .pop(); // último antes do laudo
+        if (ownerNoLaudo) {
+          const ownerLower = ownerNoLaudo.owner.toLowerCase();
+          const eTecnico = TECNICOS_AST.some(t => ownerLower.includes(t));
+          if (eTecnico) assigneeName = ownerNoLaudo.owner;
+        }
+      }
+      // Fallback: último comentário de técnico AST no ticket
+      if (!assigneeName) {
+        for (const e of allEvents) {
+          const actorNome = e.actor?.name || '';
+          const actorLower = actorNome.toLowerCase();
+          if (e.eventName === 'CommentAdded' && TECNICOS_AST.some(t => actorLower.includes(t))) {
+            assigneeName = actorNome;
+            break; // allEvents é decrescente — primeiro encontrado = mais recente
+          }
+        }
+      }
+    }
 
-    res.json({ ticketId, assigneeName, passouPorLaudo, ultimoTecnicoComentou, statusTimes, statusChanges });
+    res.json({ ticketId, assigneeName, passouPorLaudo, ownerChanges, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
