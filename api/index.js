@@ -174,21 +174,32 @@ app.get('/api/desk-history', async (req, res) => {
       'Aguardando Prazo / Autorização Descarte', 'Ag. Prazo / Autorização Descarte'
     ]);
 
+    const TECNICOS_AST = ['marcos miceli', 'nathan magri', 'wendel correa', 'marcos', 'nathan', 'wendel'];
     const statusChanges = [];
-    const timeEntriesPorAgente = {};
-    const EXCLUIR_AGENTES = new Set(['Assistência técnica', 'Sem agente', 'Blueprint', '']);
+    let passouPorLaudo = false;
+    let ultimoTecnicoComentou = null; // último técnico que comentou no ticket
 
+    // allEvents vem do Zoho em ordem decrescente (mais recente primeiro)
+    // Percorre em ordem cronológica inversa para pegar o ÚLTIMO comentário de técnico
     for (const e of allEvents) {
-      // Conta entradas de tempo por agente — técnico é quem tem mais entradas
-      if (e.eventName === 'TimeEntryAdded' && e.actor?.name && !EXCLUIR_AGENTES.has(e.actor.name)) {
-        timeEntriesPorAgente[e.actor.name] = (timeEntriesPorAgente[e.actor.name] || 0) + 1;
+      const actorNome = e.actor?.name || '';
+      const actorLower = actorNome.toLowerCase();
+      const eTecnico = TECNICOS_AST.some(t => actorLower.includes(t));
+
+      // Registra comentário de técnico — como eventos vêm do mais recente,
+      // o primeiro que encontrarmos já é o mais recente
+      if (eTecnico && e.eventName === 'CommentAdded' && !ultimoTecnicoComentou) {
+        ultimoTecnicoComentou = actorNome;
       }
+
       if (!e.eventInfo) continue;
       for (const info of e.eventInfo) {
         if (info.propertyName !== 'Status') continue;
         const val = info.propertyValue;
         const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-        if (toStatus && !STATUS_IGNORADOS.has(toStatus)) {
+        if (!toStatus) continue;
+        if (toStatus === 'Aguardando laudo') passouPorLaudo = true;
+        if (!STATUS_IGNORADOS.has(toStatus)) {
           statusChanges.push({ status: toStatus, time: e.eventTime });
         }
       }
@@ -209,11 +220,11 @@ app.get('/api/desk-history', async (req, res) => {
       }
     }
 
-    // Técnico = agente com mais entradas de tempo no ticket
-    const tecnicos = Object.entries(timeEntriesPorAgente).sort((a, b) => b[1] - a[1]);
-    const assigneeName = tecnicos.length > 0 ? tecnicos[0][0] : null;
+    // Técnico = último técnico AST que comentou no ticket,
+    // mas só conta se o ticket passou por "Aguardando laudo"
+    const assigneeName = (passouPorLaudo && ultimoTecnicoComentou) ? ultimoTecnicoComentou : null;
 
-    res.json({ ticketId, assigneeName, timeEntriesPorAgente, statusTimes, statusChanges });
+    res.json({ ticketId, assigneeName, passouPorLaudo, ultimoTecnicoComentou, statusTimes, statusChanges });
   } catch (e) {
     res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
   }
