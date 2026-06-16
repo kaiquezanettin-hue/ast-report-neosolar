@@ -108,6 +108,12 @@
     text-align: center;
     min-height: 16px;
   }
+
+  /* ── Aba Técnicos — botões de período ── */
+  .tec-periodo-btn { background:var(--bg3); border:1px solid var(--border); color:var(--gray2); padding:3px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-family:var(--font); transition:all 0.2s; white-space:nowrap; }
+  .tec-periodo-btn:hover { border-color:var(--yellow); color:var(--white); }
+  .tec-periodo-btn.active { background:var(--yellow); color:var(--bg); border-color:var(--yellow); font-weight:600; }
+
   @keyframes shake {
     0%,100% { transform: translateX(0); }
     25%      { transform: translateX(-6px); }
@@ -535,51 +541,71 @@
   <!-- KPIs -->
   <div class="kpis" id="kpi-tecnicos"></div>
 
-  <!-- Gráfico evolução mensal -->
+  <!-- Gráfico 1: Hoje -->
   <div class="panel yellow" style="margin-bottom:16px;">
-    <div class="panel-title">Tickets Finalizados por Técnico <span>evolução mensal</span></div>
-    <div style="position:relative;height:320px;"><canvas id="chart-tecnicos-mensal"></canvas></div>
+    <div class="panel-title">Tickets Finalizados Hoje <span>por técnico</span></div>
+    <div style="position:relative;height:200px;"><canvas id="chart-tecnicos-hoje"></canvas></div>
   </div>
 
-  <div class="grid2">
-    <!-- Gráfico donut distribuição -->
-    <div class="panel blue">
-      <div class="panel-title">Distribuição no Período <span>% por técnico</span></div>
-      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-donut"></canvas></div>
+  <!-- Gráfico 2+3: Período com toggle Semana/Mês/Trimestre/Ano + Donut sincronizado -->
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel blue" style="margin-bottom:0;">
+      <div class="panel-title">
+        Tickets Finalizados por Período
+        <div style="display:flex;gap:5px;margin-left:auto;">
+          <button class="tec-periodo-btn active" onclick="setTecPeriodo('semana',this)">Semana</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('mes',this)">Mês</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('trimestre',this)">Trimestre</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('ano',this)">Ano</button>
+        </div>
+      </div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-periodo"></canvas></div>
     </div>
 
-    <!-- Tabela detalhada -->
-    <div class="panel">
-      <div class="panel-title">Detalhamento por Técnico e Período</div>
-      <div style="overflow-x:auto;">
-        <table class="tbl" id="tbl-tecnicos" style="width:100%;">
-          <thead id="thead-tecnicos"></thead>
-          <tbody id="tbody-tecnicos"></tbody>
+    <!-- Gráfico donut — sincronizado com o toggle -->
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title">Distribuição <span id="donut-tec-label">por semana</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-donut"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Tabela resumo por técnico × período -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Resumo por Técnico e Período</div>
+    <div style="overflow-x:auto;">
+      <table class="tbl" id="tbl-tecnicos" style="width:100%;">
+        <thead id="thead-tecnicos"></thead>
+        <tbody id="tbody-tecnicos"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tabela de tickets individuais — minimizável -->
+  <div class="panel" id="panel-tec-detalhes">
+    <div class="panel-title" style="cursor:pointer;" onclick="toggleTecDetalhes()">
+      Tickets Finalizados — Detalhes
+      <span style="margin-left:8px;font-size:11px;color:var(--gray2);">passou por: Aguardando laudo</span>
+      <span id="tec-detalhes-toggle-icon" style="margin-left:auto;font-size:16px;color:var(--gray2);">▼</span>
+    </div>
+    <div id="tec-detalhes-body">
+      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="filtro-tecnico" onchange="renderTecnicos()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:5px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+          <option value="">Todos os técnicos</option>
+        </select>
+      </div>
+      <div style="overflow-x:auto;max-height:380px;overflow-y:auto;">
+        <table class="tbl" id="tbl-tecnicos-tickets" style="width:100%;font-size:12px;">
+          <thead><tr>
+            <th>Ticket #</th><th>Técnico</th><th>Produto</th>
+            <th class="num">Data</th><th class="num">Horas no Laudo</th>
+          </tr></thead>
+          <tbody id="tbody-tecnicos-tickets"></tbody>
         </table>
       </div>
     </div>
   </div>
 
-  <!-- Tabela de tickets individuais -->
-  <div class="panel">
-    <div class="panel-title">Tickets Finalizados — Detalhes
-      <span style="margin-left:auto;">status: Aguardando laudo</span>
-    </div>
-    <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <select id="filtro-tecnico" onchange="renderTecnicos()" style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:5px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
-        <option value="">Todos os técnicos</option>
-      </select>
-    </div>
-    <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
-      <table class="tbl" id="tbl-tecnicos-tickets" style="width:100%;font-size:12px;">
-        <thead><tr>
-          <th>Ticket #</th><th>Técnico</th><th>Produto</th>
-          <th class="num">Entrada no Status</th><th class="num">Horas no Status</th>
-        </tr></thead>
-        <tbody id="tbody-tecnicos-tickets"></tbody>
-      </table>
-    </div>
-  </div>
 </div><!-- /tab-tecnicos -->
 
 </main>
