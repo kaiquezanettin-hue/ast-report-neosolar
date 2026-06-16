@@ -1,599 +1,615 @@
-const express = require('express');
-const axios = require('axios');
-const multer = require('multer');
-const csv = require('csv-parse/sync');
-const path = require('path');
-
-const app = express();
-app.use(express.json({ limit: '50mb' }));
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-
-// ─── Supabase ────────────────────────────────────────────────────────
-const SUPA_URL = process.env.SUPABASE_URL;
-const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-async function dbGet(key) {
-  try {
-    const res = await axios.get(
-      `${SUPA_URL}/rest/v1/ast_storage?key=eq.${encodeURIComponent(key)}&select=value,updated_at`,
-      { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
-    );
-    if (res.data && res.data.length > 0) {
-      return { value: JSON.parse(res.data[0].value), updated_at: res.data[0].updated_at };
-    }
-    return { value: null, updated_at: null };
-  } catch { return { value: null, updated_at: null }; }
-}
-
-async function dbSet(key, value) {
-  try {
-    await axios.post(`${SUPA_URL}/rest/v1/ast_storage`,
-      { key, value: JSON.stringify(value), updated_at: new Date().toISOString() },
-      {
-        headers: {
-          apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`,
-          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
-        }
-      }
-    );
-    return true;
-  } catch (e) { console.error('dbSet error:', e.message); return false; }
-}
-
-// ─── Memory cache ────────────────────────────────────────────────────
-let memCache = {
-  rma: { data: null, ts: 0, updated_at: null },
-  sankhya: { data: null, ts: 0, updated_at: null },
-  sheets: { data: null, ts: 0, updated_at: null },
-  stockMin: { data: {}, ts: 0 }
-};
-const MEM_TTL = 10 * 60 * 1000;
-const delay = ms => new Promise(r => setTimeout(r, ms));
-
-// ─── Zoho Auth ───────────────────────────────────────────────────────
-let zohoToken = { access_token: null, expires_at: 0 };
-
-async function getDeskToken() {
-  if (zohoToken.access_token && Date.now() < zohoToken.expires_at) return zohoToken.access_token;
-  const res = await axios.post('https://accounts.zoho.com/oauth/v2/token', null, {
-    params: {
-      refresh_token: process.env.ZOHO_REFRESH_TOKEN,
-      client_id: process.env.ZOHO_CLIENT_ID,
-      client_secret: process.env.ZOHO_CLIENT_SECRET,
-      grant_type: 'refresh_token'
-    }
-  });
-  zohoToken.access_token = res.data.access_token;
-  zohoToken.expires_at = Date.now() + (res.data.expires_in - 60) * 1000;
-  return zohoToken.access_token;
-}
-
-// ─── SLA map ─────────────────────────────────────────────────────────
-const SLA = {
-  'Aguardando Teste': 72, 'Ag. teste': 72,
-  'Em Teste': 6, 'Em teste': 6,
-  'Em Manutenção': 24, 'Em manutenção': 24,
-  'Aguardando Peça Reposição': 1080, 'Ag. Peça Reposição': 1080,
-  'Ag. Aprovação Manutenção SG': 48, 'Ag. aprovação manutenção (SG)': 48,
-  'Em Tratativa Devolução Cliente': 48, 'Em tratativa p/ devolução cliente': 48,
-  'Aguardando Manutenção SG': 24, 'Aguardando Laudo': 3
-};
-
-function getSlaStatus(status, hours) {
-  const sla = SLA[status];
-  if (!sla) return 'ok';
-  const pct = hours / sla;
-  if (pct >= 1) return 'vencido';
-  if (pct >= 0.75) return 'atencao';
-  return 'ok';
-}
-
-// ─── Desk tickets endpoint (paginado — 1 página por chamada) ─────────
-app.get('/api/desk-page', async (req, res) => {
-  try {
-    const from = parseInt(req.query.from) || 0;
-    const limit = 50;
-    const token = await getDeskToken();
-    const deptId = process.env.ZOHO_DEPT_ID;
-
-    await delay(150);
-    const response = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts&sortBy=-createdTime`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-
-    const allData = response.data.data || [];
-
-    // DEBUG: logar estrutura do primeiro ticket para inspecionar campos de agente
-    if (allData.length > 0 && parseInt(req.query.from) === 0) {
-      const sample = allData[0];
-      console.log('DESK-PAGE DEBUG ticket keys:', Object.keys(sample));
-      console.log('DESK-PAGE DEBUG assignee field:', JSON.stringify({
-        assignee: sample.assignee,
-        assigneeName: sample.assigneeName,
-        assigneeId: sample.assigneeId,
-        agent: sample.agent,
-        agentId: sample.agentId,
-        owner: sample.owner,
-        ownerId: sample.ownerId,
-      }));
-    }
-
-    const tickets = allData.map(t => ({
-      id: t.id,
-      ticketNumber: t.ticketNumber,
-      subject: t.subject,
-      status: t.status,
-      assigneeName: t.assignee?.name || t.assignee?.firstName || t.assigneeName || t.agent?.name || t.owner?.name || 'Sem agente',
-      createdTime: t.createdTime,
-      closedTime: t.closedTime || null,
-      modifiedTime: t.modifiedTime,
-      hoursInCurrentStatus: (Date.now() - new Date(t.modifiedTime || t.createdTime).getTime()) / 3600000,
-      totalHours: t.closedTime
-        ? (new Date(t.closedTime) - new Date(t.createdTime)) / 3600000
-        : (Date.now() - new Date(t.createdTime).getTime()) / 3600000
-    }));
-
-    res.json({
-      tickets,
-      hasMore: allData.length === limit,
-      nextFrom: from + limit,
-      debug: allData.length === 0 ? response.data : undefined
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data, status_code: e.response?.status });
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Report AST — NeoSolar</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20242.52%20454.71%22%3E%3Crect%20width%3D%22242.52%22%20height%3D%22454.71%22%20rx%3D%2240%22%20fill%3D%22%231c1e20%22%2F%3E%3Cpath%20fill%3D%22%23FFD04C%22%20d%3D%22M12.46%2C87.32c-4.2%2C0-8.37.18-12.46.53v25.07c4.09-.46%2C8.26-.68%2C12.46-.68%2C63.16%2C0%2C114.54%2C51.38%2C114.54%2C114.51s-51.38%2C114.54-114.54%2C114.54c-4.2%2C0-8.37-.21-12.46-.68v25.07c4.09.36%2C8.26.53%2C12.46.53%2C76.91%2C0%2C139.47-62.56%2C139.47-139.47S89.37%2C87.32%2C12.46%2C87.32Z%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%222.12%22%20width%3D%2224.92%22%20height%3D%2271.6%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22170.95%22%20y%3D%22214.3%22%20width%3D%2271.57%22%20height%3D%2224.92%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%223.3%22%20y%3D%22383.13%22%20width%3D%2224.92%22%20height%3D%2271.58%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22138.59%22%20y%3D%22326.61%22%20width%3D%2224.92%22%20height%3D%2271.57%22%20transform%3D%22translate%28-212.01%20212.96%29%20rotate%28-45%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22114.42%22%20y%3D%2279.03%22%20width%3D%2271.58%22%20height%3D%2224.92%22%20transform%3D%22translate%28-20.69%20133.02%29%20rotate%28-45.01%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22158.05%22%20y%3D%22145.79%22%20width%3D%2271.58%22%20height%3D%2224.93%22%20transform%3D%22translate%28-43.79%2079.83%29%20rotate%28-20.97%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%2254.47%22%20y%3D%2238.67%22%20width%3D%2271.57%22%20height%3D%2224.92%22%20transform%3D%22translate%287.65%20113.87%29%20rotate%28-66.75%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22178.37%22%20y%3D%22267.98%22%20width%3D%2224.92%22%20height%3D%2271.57%22%20transform%3D%22translate%28-164.01%20356.5%29%20rotate%28-66.31%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%2273.81%22%20y%3D%22369.45%22%20width%3D%2224.92%22%20height%3D%2271.57%22%20transform%3D%22translate%28-143.17%2060.25%29%20rotate%28-21.61%29%22%2F%3E%3C%2Fsvg%3E"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+  /* ── Login screen — idêntico ao Hub ── */
+  #login-screen {
+    position: fixed;
+    inset: 0;
+    background: #2c2e30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
   }
-});
-
-// ─── Desk history endpoint (1 ticket por vez) ────────────────────────
-app.get('/api/desk-history', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-
-    const token = await getDeskToken();
-
-    // Paginação completa — Zoho retorna no máximo 50 eventos por vez
-    let allEvents = [];
-    let from = 0;
-    while (true) {
-      await delay(100);
-      const histRes = await axios.get(
-        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=50&from=${from}`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      const batch = histRes.data.data || [];
-      allEvents = allEvents.concat(batch);
-      if (batch.length < 50) break;
-      from += 50;
-    }
-
-    const STATUS_IGNORADOS = new Set([
-      'Aguardando Chegada de Produto na Neosolar',
-      'Descarte', 'Produto despachado AST', 'Produto despachado',
-      'Aguardando Prazo / Autorização Descarte', 'Ag. Prazo / Autorização Descarte'
-    ]);
-
-    const TECNICOS_AST = ['marcos miceli', 'nathan magri', 'wendel correa', 'marcos', 'nathan', 'wendel'];
-    const statusChanges = [];
-    // Mapa de proprietário por timestamp: { time, owner }
-    const ownerChanges = [];
-    let passouPorLaudo = false;
-
-    for (const e of allEvents) {
-      if (!e.eventInfo) continue;
-      for (const info of e.eventInfo) {
-        // Captura mudanças de Status
-        if (info.propertyName === 'Status') {
-          const val = info.propertyValue;
-          const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-          if (!toStatus) continue;
-          if (toStatus === 'Aguardando laudo') passouPorLaudo = true;
-          if (!STATUS_IGNORADOS.has(toStatus)) {
-            statusChanges.push({ status: toStatus, time: e.eventTime });
-          }
-        }
-        // Captura mudanças de Owner/Proprietário
-        if (info.propertyName === 'Owner' || info.propertyName === 'Assignee' ||
-            info.propertyName === 'ownerId' || info.propertyName === 'assigneeId') {
-          const val = info.propertyValue;
-          const newOwner = val?.updatedValue || val?.name || (typeof val === 'string' ? val : null);
-          if (newOwner) {
-            ownerChanges.push({ owner: newOwner, time: e.eventTime });
-          }
-        }
-      }
-    }
-
-    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
-    ownerChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
-
-    const statusTimes = {};
-    for (let i = 0; i < statusChanges.length; i++) {
-      const sName = statusChanges[i].status;
-      const start = new Date(statusChanges[i].time);
-      const end = i < statusChanges.length - 1
-        ? new Date(statusChanges[i + 1].time)
-        : new Date();
-      const hours = (end - start) / 3600000;
-      if (hours > 0 && hours < 8760) {
-        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
-      }
-    }
-
-    // Encontra quem era o proprietário quando o ticket entrou em "Aguardando laudo"
-    let assigneeName = null;
-    if (passouPorLaudo) {
-      // Acha o timestamp da entrada em "Aguardando laudo"
-      const laudoEvent = statusChanges.find(s => s.status === 'Aguardando laudo');
-      if (laudoEvent && ownerChanges.length > 0) {
-        // Pega o proprietário mais recente ANTES ou NO MOMENTO do laudo
-        const laudoTime = new Date(laudoEvent.time);
-        const ownerNoLaudo = ownerChanges
-          .filter(o => new Date(o.time) <= laudoTime)
-          .pop(); // último antes do laudo
-        if (ownerNoLaudo) {
-          const ownerLower = ownerNoLaudo.owner.toLowerCase();
-          const eTecnico = TECNICOS_AST.some(t => ownerLower.includes(t));
-          if (eTecnico) assigneeName = ownerNoLaudo.owner;
-        }
-      }
-      // Fallback: último comentário de técnico AST no ticket
-      if (!assigneeName) {
-        for (const e of allEvents) {
-          const actorNome = e.actor?.name || '';
-          const actorLower = actorNome.toLowerCase();
-          if (e.eventName === 'CommentAdded' && TECNICOS_AST.some(t => actorLower.includes(t))) {
-            assigneeName = actorNome;
-            break; // allEvents é decrescente — primeiro encontrado = mais recente
-          }
-        }
-      }
-    }
-
-    res.json({ ticketId, assigneeName, passouPorLaudo, ownerChanges, statusTimes, statusChanges });
-  } catch (e) {
-    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
+  .login-box {
+    background: #383a3c;
+    border-radius: 16px;
+    padding: 48px 52px;
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   }
-});
-
-// ─── CSV Parsers ─────────────────────────────────────────────────────
-function parseRmaCsv(buffer) {
-  const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
-  return records.map(r => ({
-    fornecedor: r['Fornecedor'] || '',
-    deskNum: r['Desk #'] || '',
-    model: r['Model #'] || '',
-    sku: r['SKU'] || '',
-    fault: r['Fault description'] || '',
-    testDate: r['Test Date in the lab'] || '',
-    validation: r['Validation'] || '',
-    service: r['Service Performed'] || '',
-    skuComponents: r['SKU dos componentes consumidos no reparo'] || '',
-    componentModel: r['Model PCB / Component'] || '',
-    businessUnit: r['Business Unit'] || '',
-    addedTime: r['Added Time'] || '',
-    purchasedNeoSolar: r['Product purchased from neosolar?'] || '',
-    testLocation: r['Test location'] || ''
-  }));
-}
-
-function parseSankhyaCsv(buffer) {
-  return csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
-}
-
-function parseSheetsCsv(buffer) {
-  const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
-  return records.map(r => ({
-    fornecedor: r['Fornecedor'] || '',
-    categoria: r['Categoria'] || '',
-    sku: r['SKU'] || '',
-    modelo: r['Modelo'] || '',
-    quantidade: parseFloat(r['Quantidade']) || 0,
-    saida: parseFloat(r['Saida']) || 0,
-    totalFisico: parseFloat(r['Total Fisico']) || 0
-  })).filter(r => r.sku);
-}
-
-// ─── Supabase loader ─────────────────────────────────────────────────
-async function getFromDb(key, memKey) {
-  if (memCache[memKey].data && Date.now() - memCache[memKey].ts < MEM_TTL) return memCache[memKey];
-  const row = await dbGet(key);
-  if (row.value) {
-    const actualData = row.value && row.value.data !== undefined ? row.value.data : row.value;
-    const actualUpdatedAt = (row.value && row.value.updated_at) ? row.value.updated_at : row.updated_at;
-    memCache[memKey] = { data: actualData, ts: Date.now(), updated_at: actualUpdatedAt };
+  .login-logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
-  return memCache[memKey];
-}
-
-// ─── Upload routes ────────────────────────────────────────────────────
-app.post('/api/upload/rma', upload.single('file'), async (req, res) => {
-  try {
-    const data = parseRmaCsv(req.file.buffer);
-    const updated_at = new Date().toISOString();
-    await dbSet('rma', { data, updated_at });
-    memCache.rma = { data, ts: Date.now(), updated_at };
-    res.json({ ok: true, count: data.length, updated_at });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.post('/api/upload/sankhya', upload.single('file'), async (req, res) => {
-  try {
-    const data = parseSankhyaCsv(req.file.buffer);
-    const updated_at = new Date().toISOString();
-    await dbSet('sankhya', { data, updated_at });
-    memCache.sankhya = { data, ts: Date.now(), updated_at };
-    res.json({ ok: true, count: data.length, updated_at });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.post('/api/upload/spare-parts', upload.single('file'), async (req, res) => {
-  try {
-    const data = parseSheetsCsv(req.file.buffer);
-    const updated_at = new Date().toISOString();
-    await dbSet('spare_parts', { data, updated_at });
-    memCache.sheets = { data, ts: Date.now(), updated_at };
-    res.json({ ok: true, count: data.length, updated_at });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.post('/api/stock-min', async (req, res) => {
-  const current = (await dbGet('stock_min')).value || {};
-  const merged = { ...current, ...req.body };
-  await dbSet('stock_min', merged);
-  memCache.stockMin = { data: merged, ts: Date.now() };
-  res.json({ ok: true });
-});
-
-// ─── Report endpoint ──────────────────────────────────────────────────
-app.post('/api/report', async (req, res) => {
-  try {
-    const { from, to, tickets: allTickets = [] } = req.body;
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
-
-    const openTickets = allTickets.filter(t => !t.closedTime);
-    const periodTickets = allTickets.filter(t => {
-      const d = new Date(t.createdTime);
-      return d >= fromDate && d <= toDate;
-    });
-
-    const slaByStatus = {}, technicians = {};
-    for (const t of openTickets) {
-      const slaS = getSlaStatus(t.status, t.hoursInCurrentStatus || 0);
-      if (!slaByStatus[t.status]) slaByStatus[t.status] = { total: 0, ok: 0, atencao: 0, vencido: 0, totalHours: 0 };
-      slaByStatus[t.status].total++;
-      slaByStatus[t.status][slaS]++;
-      slaByStatus[t.status].totalHours += t.hoursInCurrentStatus || 0;
-      if (!technicians[t.assigneeName]) technicians[t.assigneeName] = { total: 0, ok: 0, atencao: 0, vencido: 0 };
-      technicians[t.assigneeName].total++;
-      technicians[t.assigneeName][slaS]++;
-    }
-
-    const monthlyTrend = {};
-    for (const t of periodTickets) {
-      const month = t.createdTime?.substring(0, 7) || 'N/A';
-      if (!monthlyTrend[month]) monthlyTrend[month] = { opened: 0, closed: 0 };
-      monthlyTrend[month].opened++;
-      if (t.closedTime) monthlyTrend[month].closed++;
-    }
-
-    const closedPeriod = periodTickets.filter(t => t.closedTime);
-    const avgTimeByAgent = {};
-    for (const t of closedPeriod) {
-      if (!avgTimeByAgent[t.assigneeName]) avgTimeByAgent[t.assigneeName] = { totalHours: 0, count: 0 };
-      avgTimeByAgent[t.assigneeName].totalHours += t.totalHours || 0;
-      avgTimeByAgent[t.assigneeName].count++;
-    }
-
-    const rmaCache = await getFromDb('rma', 'rma');
-    const rma = (rmaCache.data || []).filter(r => {
-      const d = new Date(r.testDate);
-      return d >= fromDate && d <= toDate;
-    });
-
-    const sankhyaCache  = await getFromDb('sankhya', 'sankhya');
-    const sheetsCache   = await getFromDb('spare_parts', 'sheets');
-    const stockMinCache = await getFromDb('stock_min', 'stockMin');
-    const stockMins = stockMinCache.data || {};
-    const spareParts = (sheetsCache.data || []).map(p => ({
-      ...p, minStock: stockMins[p.sku] || 0,
-      alert: p.quantidade <= (stockMins[p.sku] || 0) && (stockMins[p.sku] || 0) > 0
-    }));
-
-    const productCount = {}, faultCount = {}, lineCount = {}, serviceCount = {};
-    const warrantyCount = { warranty: 0, noWarranty: 0, noWarrantyMaint: 0 };
-    const componentConsumption = {}, monthlyConsumption = {};
-
-    for (const r of rma) {
-      const modelKey = r.model || 'Desconhecido';
-      if (!productCount[modelKey]) productCount[modelKey] = { count: 0, sku: r.sku, fornecedor: r.fornecedor };
-      productCount[modelKey].count++;
-      const faultCat = r.fault || 'Desconhecido';
-      faultCount[faultCat] = (faultCount[faultCat] || 0) + 1;
-      lineCount[r.fornecedor] = (lineCount[r.fornecedor] || 0) + 1;
-      serviceCount[r.service] = (serviceCount[r.service] || 0) + 1;
-      const v = r.validation.toLowerCase();
-      if (v.includes('no warranty maintenance')) warrantyCount.noWarrantyMaint++;
-      else if (v.includes('no warranty')) warrantyCount.noWarranty++;
-      else if (v.includes('warranty')) warrantyCount.warranty++;
-
-      if (r.skuComponents && r.skuComponents !== 'Sem SKU') {
-        const skus = r.skuComponents.split(',').map(s => s.trim()).filter(Boolean);
-        for (const sku of skus) {
-          if (!componentConsumption[sku]) componentConsumption[sku] = { count: 0, warranty: 0, noWarranty: 0, model: r.componentModel };
-          componentConsumption[sku].count++;
-          if (v.includes('no warranty')) componentConsumption[sku].noWarranty++;
-          else componentConsumption[sku].warranty++;
-        }
-        const month = r.testDate ? r.testDate.substring(3, 10) : 'N/A';
-        if (!monthlyConsumption[month]) monthlyConsumption[month] = {};
-        for (const sku of skus) {
-          if (!monthlyConsumption[month][sku]) monthlyConsumption[month][sku] = { total: 0, warranty: 0, noWarranty: 0 };
-          monthlyConsumption[month][sku].total++;
-          if (v.includes('no warranty')) monthlyConsumption[month][sku].noWarranty++;
-          else monthlyConsumption[month][sku].warranty++;
-        }
-      }
-    }
-
-    const testLocationCount = {};
-    for (const r of rma) {
-      const loc = (r.testLocation || 'Não informado').trim();
-      testLocationCount[loc] = (testLocationCount[loc] || 0) + 1;
-    }
-
-    const topProducts   = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
-    const topFaults     = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
-    const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
-
-    const rmaAllCache = await getFromDb('rma', 'rma');
-    const rmaAll = rmaAllCache.data || [];
-    const rmaRaw = rmaAll;
-    const rmaRawFull = rmaAll;
-
-    function getTrimestre(dateStr) {
-      if (!dateStr) return null;
-      const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-      const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
-      if (m) {
-        const d = new Date(parseInt(m[3]), months[m[2]], parseInt(m[1]));
-        const q = Math.ceil((d.getMonth() + 1) / 3);
-        return `T${q} ${d.getFullYear()}`;
-      }
-      const d2 = new Date(dateStr);
-      if (!isNaN(d2)) {
-        const q = Math.ceil((d2.getMonth() + 1) / 3);
-        return `T${q} ${d2.getFullYear()}`;
-      }
-      return null;
-    }
-
-    function parseAddedTime(dateStr) {
-      if (!dateStr) return null;
-      const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-      const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
-      if (m) return new Date(parseInt(m[3]), months[m[2]], parseInt(m[1]));
-      const d = new Date(dateStr);
-      return isNaN(d) ? null : d;
-    }
-
-    const diffDias = (toDate - fromDate) / (1000 * 60 * 60 * 24);
-    const usarMes = diffDias <= 92;
-
-    function getPeriodo(dateStr) {
-      const trim = getTrimestre(dateStr);
-      if (!trim) return null;
-      if (usarMes) {
-        const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
-        const months = { Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12' };
-        if (m) return `${months[m[2]]}/${m[3]}`;
-        const d2 = new Date(dateStr);
-        if (!isNaN(d2)) return `${String(d2.getMonth()+1).padStart(2,'0')}/${d2.getFullYear()}`;
-        return null;
-      }
-      return trim;
-    }
-
-    const trimestralData = {};
-    for (const r of rmaAll) {
-      const rDate = parseAddedTime(r.addedTime);
-      if (!rDate || rDate < fromDate || rDate > toDate) continue;
-      const periodo = getPeriodo(r.addedTime);
-      if (!periodo) continue;
-      if (!trimestralData[periodo]) trimestralData[periodo] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
-      const svc = r.service || '';
-      trimestralData[periodo].services[svc] = (trimestralData[periodo].services[svc] || 0) + 1;
-      const loc = (r.testLocation || 'Não informado').trim();
-      if (!trimestralData[periodo]._locations) trimestralData[periodo]._locations = {};
-      trimestralData[periodo]._locations[loc] = (trimestralData[periodo]._locations[loc] || 0) + 1;
-      const v = (r.validation || '').toLowerCase();
-      if (v.includes('no warranty maintenance')) trimestralData[periodo].maintenance++;
-      else if (v.includes('no warranty')) trimestralData[periodo].noWarranty++;
-      else if (v.includes('warranty')) trimestralData[periodo].warranty++;
-    }
-
-    res.json({
-      updatedAt: new Date().toISOString(),
-      desk: {
-        total: openTickets.length,
-        totalClosed: allTickets.filter(t => t.closedTime).length,
-        totalHistorico: periodTickets.length,
-        slaByStatus, byTechnician: technicians,
-        avgTimeByStatus: [],
-        avgTimeByAgent: Object.entries(avgTimeByAgent).map(([name, v]) => ({
-          name, avgHours: v.count > 0 ? v.totalHours / v.count : 0, count: v.count, closed: v.count
-        })).sort((a, b) => b.count - a.count),
-        monthlyTrend
-      },
-      rma: {
-        total: rma.length, topProducts, topFaults, lineCount, serviceCount,
-        warrantyCount, topComponents, monthlyConsumption,
-        raw: rmaRaw, rawFull: rmaRawFull,
-        trimestral: trimestralData, testLocation: testLocationCount
-      },
-      spareParts,
-      sankhya: (sankhyaCache.data || []).slice(0, 500),
-      dataStatus: {
-        desk: allTickets.length > 0,
-        rma: (rmaCache.data || []).length > 0,
-        sankhya: (sankhyaCache.data || []).length > 0,
-        spareParts: spareParts.length > 0
-      },
-      lastUpdated: {
-        rma: rmaCache.updated_at || null,
-        sankhya: sankhyaCache.updated_at || null,
-        spareParts: sheetsCache.updated_at || null
-      }
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e.message });
+  .login-logo-wrap span {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: #FFD04C;
+    letter-spacing: 1px;
   }
-});
-
-// ─── Status ───────────────────────────────────────────────────────────
-app.get('/api/status', async (req, res) => {
-  const rma     = await getFromDb('rma', 'rma');
-  const sankhya = await getFromDb('sankhya', 'sankhya');
-  const sheets  = await getFromDb('spare_parts', 'sheets');
-  res.json({
-    rma:     { loaded: !!(rma.data),     count: (rma.data     || []).length, updatedAt: rma.updated_at },
-    sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at },
-    sheets:  { loaded: !!(sheets.data),  count: (sheets.data  || []).length, updatedAt: sheets.updated_at }
-  });
-});
-
-
-// ─── DEBUG: ver estrutura bruta de um ticket ─────────────────────────
-app.get('/api/debug-ticket', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-    const token = await getDeskToken();
-    await delay(150);
-    const r = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee,contacts,team`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-    // Retorna o objeto completo para inspecionar os campos
-    res.json({
-      id: r.data.id,
-      ticketNumber: r.data.ticketNumber,
-      assignee: r.data.assignee,
-      assigneeName: r.data.assigneeName,
-      assigneeId: r.data.assigneeId,
-      allKeys: Object.keys(r.data),
-      raw: r.data
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data });
+  .login-subtitle {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: #888;
+    text-transform: uppercase;
+    text-align: center;
+    margin-top: -8px;
   }
-});
+  .login-input-wrap { width: 100%; position: relative; }
+  .login-input-wrap input {
+    width: 100%;
+    background: #2c2e30;
+    border: 1.5px solid #4a4c4e;
+    color: #FFFDF0;
+    padding: 13px 44px 13px 16px;
+    border-radius: 8px;
+    font-family: 'Barlow', sans-serif;
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s;
+    letter-spacing: 1px;
+  }
+  .login-input-wrap input::placeholder { color: #666; letter-spacing: 0; }
+  .login-input-wrap input:focus { border-color: #FFD04C; }
+  .login-input-wrap input.error { border-color: #e05252; animation: shake 0.3s; }
+  .login-toggle {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0;
+    line-height: 1;
+  }
+  .login-toggle:hover { color: #FFFDF0; }
+  .login-btn {
+    width: 100%;
+    background: #FFD04C;
+    border: none;
+    color: #1c1e20;
+    padding: 13px;
+    border-radius: 8px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+  }
+  .login-btn:hover { background: #e6b800; }
+  .login-btn:active { transform: scale(0.98); }
+  .login-error {
+    font-size: 12px;
+    color: #e05252;
+    text-align: center;
+    min-height: 16px;
+  }
+
+  /* ── Aba Técnicos — botões de período ── */
+  .tec-periodo-btn { background:var(--bg3); border:1px solid var(--border); color:var(--gray2); padding:3px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-family:var(--font); transition:all 0.2s; white-space:nowrap; }
+  .tec-periodo-btn:hover { border-color:var(--yellow); color:var(--white); }
+  .tec-periodo-btn.active { background:var(--yellow); color:var(--bg); border-color:var(--yellow); font-weight:600; }
+
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25%      { transform: translateX(-6px); }
+    75%      { transform: translateX(6px); }
+  }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     TELA DE LOGIN
+════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 242.52 454.71" style="height:40px;width:auto;"><defs><style>.s{fill:#ffd04c;}</style></defs><path class="s" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="s" x="2.12" width="24.92" height="71.6"/><rect class="s" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="s" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="s" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="s" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="s" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="s" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="s" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="s" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></svg>
+      <span>NeoSolar</span>
+    </div>
+    <div class="login-subtitle">Acesso Restrito · Engenharia</div>
+    <div class="login-input-wrap">
+      <input type="password" id="login-input" placeholder="Digite a senha"
+        onkeydown="if(event.key==='Enter')doLogin()"/>
+      <button class="login-toggle" onclick="toggleLoginVis()" tabindex="-1">👁</button>
+    </div>
+    <button class="login-btn" onclick="doLogin()">Entrar</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const SENHA = 'Neo@123456';
+  const SESSION_KEY = 'ast_auth';
+  function doLogin() {
+    const input = document.getElementById('login-input');
+    const err   = document.getElementById('login-error');
+    if (input.value === SENHA) {
+      sessionStorage.setItem(SESSION_KEY, '1');
+      document.getElementById('login-screen').style.display = 'none';
+      err.textContent = '';
+    } else {
+      input.classList.remove('error');
+      void input.offsetWidth;
+      input.classList.add('error');
+      err.textContent = 'Senha incorreta. Tente novamente.';
+      input.value = '';
+      input.focus();
+    }
+  }
+  function toggleLoginVis() {
+    const input = document.getElementById('login-input');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }
+  window.doLogin = doLogin;
+  window.toggleLoginVis = toggleLoginVis;
+  if (sessionStorage.getItem(SESSION_KEY) === '1') {
+    document.getElementById('login-screen').style.display = 'none';
+  }
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════ -->
+<header>
+  <div class="header-left">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1845.66 454.71" style="height:26px;width:auto;"><defs><style>.l{fill:#ffd04c;}</style></defs><g><path class="l" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="l" x="2.12" width="24.92" height="71.6"/><rect class="l" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="l" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="l" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="l" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="l" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="l" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="l" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="l" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></g><g><path class="l" d="M609.13,342.15h-43.27l-107.69-123.22v123.22h-55.83V117.52h42.62l108.35,126.52v-126.52h55.83v224.63Z"/><path class="l" d="M805.69,276.74l.33.99h-114.3c4.29,14.53,15.53,25.77,36.01,25.77,11.23,0,19.82-4.29,24.44-11.57h52.86c-7.6,33.04-38.32,53.85-77.96,53.85-52.53,0-87.54-35.02-87.54-83.91s34.03-83.58,85.23-83.58c46.58,0,81.93,32.04,81.93,80.27,0,5.94,0,12.22-.99,18.17ZM691.06,246.35h65.41c-2.97-17.51-14.53-26.76-31.71-26.76-18.17,0-29.73,10.57-33.69,26.76Z"/><path class="l" d="M1002.58,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM952.04,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.54,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="l" d="M1216,187.22h-56.16c-2.97-16.85-13.54-28.41-36.34-28.41-19.16,0-32.04,7.93-32.04,22.46,0,12.22,8.92,17.51,25.76,21.14l31.38,7.27c40.96,8.92,67.72,25.44,67.72,64.09,0,44.93-37,73.01-93.15,73.01-50.55,0-96.13-23.79-101.42-79.28h55.83c3.63,19.82,20.81,31.71,47.24,31.71,20.81,0,31.71-7.6,31.71-19.82,0-7.6-4.63-15.53-23.79-19.16l-37-8.26c-44.27-9.58-65.08-30.39-65.08-66.07,0-44.93,36.34-73.34,89.19-73.34,36.34,0,90.51,14.21,96.13,74.66Z"/><path class="l" d="M1413.22,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM1362.68,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.53,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="l" d="M1495.15,342.15h-53.51V107.61h53.51v234.54Z"/><path class="l" d="M1700.64,342.15h-53.51v-8.92c-11.89,7.6-26.43,12.22-43.94,12.22-43.27,0-79.61-36.01-79.61-83.58s36.34-83.58,79.61-83.58c17.51,0,32.04,4.63,43.94,12.22v-8.59h53.51v160.22ZM1647.12,286.65v-49.55c-9.91-11.56-21.47-15.19-33.37-15.19-21.8,0-37.66,17.84-37.66,39.97s15.86,39.64,37.66,39.64c11.89,0,23.46-3.3,33.37-14.86Z"/><path class="l" d="M1845.66,230.16c-26.1.99-42.62,7.93-55.17,20.48v91.5h-53.51v-160.22h53.51v17.18c14.21-12.22,31.38-19.82,55.17-19.82v50.87Z"/></g></svg>
+    <span class="header-sep">/</span>
+    <h1>REPORT ASSISTÊNCIA TÉCNICA</h1>
+  </div>
+  <div class="header-right">
+    <button class="refresh-btn" onclick="loadData()">↻ Atualizar</button>
+    <div id="last-update">—</div>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════
+     BARRA DE PERÍODO + FILTRO DE GARANTIA (sticky)
+════════════════════════════════════════════════ -->
+<div class="period-bar">
+  <label>De</label><input type="date" id="date-from"/>
+  <label>Até</label><input type="date" id="date-to"/>
+  <div class="period-shortcuts">
+    <button onclick="setPeriod(7)"   id="sh-7">7d</button>
+    <button onclick="setPeriod(30)"  id="sh-30" class="active">30d</button>
+    <button onclick="setPeriod(90)"  id="sh-90">90d</button>
+    <button onclick="setPeriod(365)" id="sh-365">12m</button>
+    <button onclick="setPeriodAll()" id="sh-all">Tudo</button>
+  </div>
+  <button class="apply-btn" onclick="loadData()">Aplicar</button>
+
+  <div class="period-bar-sep"></div>
+
+  <span class="garantia-inline-label">Garantia</span>
+  <div class="garantia-inline-btns" id="garantia-filter-bar">
+    <button class="active" onclick="setProdGarantia('todos',this)">Todos</button>
+    <button onclick="setProdGarantia('garantia',this)">✓ Em Garantia</button>
+    <button onclick="setProdGarantia('fora',this)">✗ Fora de Garantia</button>
+    <button onclick="setProdGarantia('manutencao',this)">🔧 Manutenção Paga</button>
+  </div>
+  <div id="prod-filter-count" style="font-size:11px;color:var(--gray2);white-space:nowrap;"></div>
+
+  <div class="data-status" id="data-status"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TABS (sticky)
+════════════════════════════════════════════════ -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('visao-geral')">Visão Geral</button>
+  <button class="tab"        onclick="switchTab('produtos')">📦 Produtos</button>
+  <button class="tab"        onclick="switchTab('operacao')">⚙️ Operação</button>
+  <button class="tab"        onclick="switchTab('importacoes')">🔩 Importações</button>
+  <button class="tab"        onclick="switchTab('sla')">📊 SLA & Lead Time</button>
+  <button class="tab"        onclick="switchTab('tecnicos')">👨‍🔧 Técnicos</button>
+  <button class="tab"        onclick="switchTab('dados')">📁 Dados</button>
+</div>
+
+<main>
+
+<!-- ═══ ABA: VISÃO GERAL ═══ -->
+<div id="tab-visao-geral" class="tab-content active">
+  <div class="kpis" id="kpi-geral"></div>
+  <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">Atendimentos por Fornecedor</div>
+      <div class="chart-wrap"><canvas id="chart-line"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Status dos Tickets (Desk)</div>
+      <div class="chart-wrap"><canvas id="chart-desk-status"></canvas></div>
+    </div>
+  </div>
+  <div class="grid3">
+    <div class="panel">
+      <div class="panel-title">Distribuição de Garantia</div>
+      <div class="chart-wrap"><canvas id="chart-warranty"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Serviços Realizados</div>
+      <div class="chart-wrap"><canvas id="chart-service"></canvas></div>
+    </div>
+    <div class="panel red">
+      <div class="panel-title">SLA Desk — Visão Geral</div>
+      <div id="sla-summary"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ABA: PRODUTOS ═══ -->
+<div id="tab-produtos" class="tab-content">
+  <div class="section-header">Análise de Produtos</div>
+
+  <div class="grid2">
+    <div class="panel blue">
+      <div class="panel-title">Entradas por Linha de Produto</div>
+      <div style="position:relative;height:280px;width:100%;"><canvas id="chart-line2"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Local de Teste <span>por período</span></div>
+      <div style="position:relative;height:320px;width:100%;"><canvas id="chart-test-location"></canvas></div>
+    </div>
+  </div>
+
+  <div class="produtos-unified-grid">
+    <div class="produtos-left-panel">
+      <div class="produtos-panel-title">
+        Top 10 Produtos com Mais Entradas
+        <span class="hint-click">clique para ver defeitos →</span>
+      </div>
+      <div id="top-products-list" class="hbar-list"></div>
+    </div>
+    <div class="produtos-right-panel" id="defeitos-panel">
+      <div class="produtos-panel-title">
+        <span id="defeitos-title-txt">Top Defeitos Recorrentes</span>
+        <span id="defeitos-badge" class="selected-badge" style="display:none;" onclick="clearProdSel()"></span>
+      </div>
+      <div id="top-faults-list" class="hbar-list"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:16px;margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
+      <div style="position:relative;height:300px;width:100%;"><canvas id="chart-garantia-donut"></canvas></div>
+      <div id="donut-garantia-legenda" style="text-align:center;margin-top:10px;"></div>
+    </div>
+    <div class="panel yellow">
+      <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Total de Chamados por Período <span>por tipo de garantia</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-garantia-periodo"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
+    </div>
+  </div>
+
+</div><!-- /tab-produtos -->
+
+<!-- ═══ ABA: OPERAÇÃO ═══ -->
+<div id="tab-operacao" class="tab-content">
+  <div class="section-header">Custo de Atendimento Técnico</div>
+  <div class="kpis" id="kpi-custo" style="margin-bottom:16px;"></div>
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel yellow">
+      <div class="panel-title">Custo por Fornecedor <span>R$ estimado no período</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-custo-linha"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Custo por Período <span>evolução mensal/trimestral</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-custo-periodo"></canvas></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Top 15 Modelos por Custo de Atendimento <span>R$ estimado — Em teste + Em manutenção + Aguardando laudo + Aguardando RMA</span></div>
+    <div style="position:relative;height:400px;"><canvas id="chart-custo-produto"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Detalhamento por Ticket
+      <span style="margin-left:auto;font-size:11px;color:var(--gray2);">R$2/min · horas úteis 09h–18h seg–sex</span>
+    </div>
+    <div style="overflow-x:auto;max-height:450px;overflow-y:auto;">
+      <table class="tbl" id="tbl-custo-tickets" style="width:100%;">
+        <thead><tr>
+          <th>Ticket #</th><th>Produto</th><th>Fornecedor</th><th>Garantia</th>
+          <th class="num">H. Úteis</th><th class="num">Custo (R$)</th><th>Status de custo</th><th>Data</th>
+        </tr></thead>
+        <tbody id="tbody-custo-tickets"></tbody>
+      </table>
+    </div>
+  </div>
+</div><!-- /tab-operacao -->
+
+<!-- ═══ ABA: IMPORTAÇÕES ═══ -->
+<div id="tab-importacoes" class="tab-content">
+  <div class="section-header">Planejamento de Importações</div>
+  <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">Top Componentes Consumidos</div>
+      <div style="overflow-x:auto;max-height:320px;overflow-y:auto;">
+        <table class="tbl" id="tbl-components">
+          <thead><tr>
+            <th>SKU</th><th>Modelo</th><th class="num">Total</th>
+            <th class="num">Em Garantia</th><th class="num">Fora Garantia</th>
+          </tr></thead>
+          <tbody id="tbody-components"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Consumo Mensal de Peças</div>
+      <div class="chart-wrap tall"><canvas id="chart-monthly"></canvas></div>
+    </div>
+  </div>
+  <div class="panel red">
+    <div class="panel-title">Estoque de Spare Parts <span>— alerta de estoque mínimo</span></div>
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
+      <input type="text" id="search-parts" placeholder="🔍 Buscar peça..."
+        style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-size:13px;width:260px;"
+        oninput="renderSpareParts()"/>
+      <button onclick="saveStockMins()" style="background:var(--yellow);color:var(--bg);border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:var(--fontc);font-size:13px;font-weight:700;">💾 Salvar Mínimos</button>
+    </div>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+      <table class="tbl" id="tbl-spare">
+        <thead><tr>
+          <th>Fornecedor</th><th>Categoria</th><th>SKU</th><th>Modelo</th>
+          <th class="num">Qtd Inicial</th><th class="num">Saída</th><th class="num">Total Físico</th>
+          <th class="num">Estoque Mín.</th><th>Status</th>
+        </tr></thead>
+        <tbody id="tbody-spare"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Base de Importações (Sankhya)</div>
+    <div style="overflow-x:auto;max-height:350px;overflow-y:auto;">
+      <table class="tbl" id="tbl-sankhya">
+        <thead><tr id="thead-sankhya"></tr></thead>
+        <tbody id="tbody-sankhya"></tbody>
+      </table>
+    </div>
+  </div>
+</div><!-- /tab-importacoes -->
+
+<!-- ═══ ABA: SLA & LEAD TIME ═══ -->
+<div id="tab-sla" class="tab-content fullwidth">
+  <div class="section-header">SLA & Lead Time por Status</div>
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label style="font-size:12px;color:var(--gray2);">Tipo:</label>
+      <select id="filtro-garantia" onchange="renderSlaReport()"
+        style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+        <option value="todos">Todos</option>
+        <option value="garantia">Em Garantia</option>
+        <option value="fora">Fora de Garantia</option>
+        <option value="manutencao">Manutenção Paga</option>
+      </select>
+    </div>
+    <div class="kpi yellow" id="kpi-sla-geral" style="min-width:140px;flex:none;"><div class="val">—</div><div class="lbl">% Conclusão SLA Geral</div></div>
+    <div class="kpi blue"   id="kpi-sla-tickets" style="min-width:120px;flex:none;"><div class="val">0</div><div class="lbl">Tickets com Histórico</div></div>
+    <div class="kpi"        id="kpi-sla-loading" style="min-width:140px;flex:none;"><div class="val" style="font-size:16px;">0/0</div><div class="lbl">Histórico Carregado</div></div>
+    <p style="font-size:11px;color:var(--gray2);margin-left:auto;">As médias de lead time estão em dias úteis (1 dia = 8h). Cruzamento com RMA para filtro de garantia.</p>
+  </div>
+
+  <div class="panel yellow" style="margin-bottom:16px;">
+    <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span>
+      <span style="margin-left:auto;color:var(--yellow);font-size:11px;cursor:pointer;font-weight:600;" onclick="abrirValidacao()">↗ VER DETALHES POR TICKET</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="tbl" id="tbl-sla-hist" style="width:100%;">
+        <thead><tr>
+          <th style="width:35%;">Subclassificações</th>
+          <th class="num" style="width:13%;">Média Resolução (dias úteis)</th>
+          <th class="num" style="width:13%;">% Conclusão SLA</th>
+          <th class="num" style="width:13%;">SLA Dias Úteis</th>
+          <th class="num" style="width:13%;">Qtde Casos</th>
+          <th class="num" style="width:13%;">% Frequência</th>
+        </tr></thead>
+        <tbody id="tbody-sla-hist">
+          <tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguardando carregamento do histórico de tickets...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel" id="painel-validacao" style="display:none;margin-bottom:16px;">
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+      Detalhes por Ticket — Validação
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="validacao-status" onchange="renderValidacaoTabela()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:3px 8px;border-radius:4px;font-family:var(--font);font-size:12px;">
+          <option value="">Todos os status</option>
+        </select>
+        <button onclick="document.getElementById('painel-validacao').style.display='none'"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--gray2);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px;">Fechar</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+      <table class="tbl" id="tbl-validacao" style="width:100%;font-size:11px;">
+        <thead><tr>
+          <th>Ticket #</th><th>Status</th><th>Macro</th>
+          <th class="num">Horas Brutas</th><th class="num">Dias Úteis</th>
+          <th class="num">SLA (du)</th><th class="num">Resultado</th><th>Criado em</th>
+        </tr></thead>
+        <tbody id="tbody-validacao"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel-title" style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--gray2);">
+    Histograma de Lead Time por Macro Status
+    <span style="color:var(--yellow);font-size:11px;font-weight:400;margin-left:8px;">dias úteis — período selecionado</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;" id="histograma-grid">
+    <div class="panel" style="border-left-color:var(--green);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">ENTRADA</div><div style="position:relative;height:220px;"><canvas id="chart-hist-entrada"></canvas></div></div>
+    <div class="panel" style="border-left-color:var(--blue);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">AVALIAÇÃO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-avaliacao"></canvas></div></div>
+    <div class="panel" style="border-left-color:#e0c052;padding:12px;"><div class="panel-title" style="margin-bottom:8px;">PAGAMENTO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-pagamento"></canvas></div></div>
+    <div class="panel" style="border-left-color:var(--orange);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">TÉCNICO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-tecnico"></canvas></div></div>
+    <div class="panel" style="border-left-color:var(--purple);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">DEVOLUÇÃO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-devolucao"></canvas></div></div>
+  </div>
+
+  <div class="panel blue">
+    <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
+    <div style="position:relative;height:380px;width:100%;"><canvas id="chart-sla-mensal"></canvas></div>
+  </div>
+</div><!-- /tab-sla -->
+
+<!-- ═══ ABA: DADOS ═══ -->
+<div id="tab-dados" class="tab-content">
+  <div class="section-header">Gerenciamento de Dados</div>
+  <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">📋 RMA — Zoho Forms</div>
+      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">
+        Exporte o CSV em: <a href="https://forms.zoho.com/neosolar/report/RMAEPEVER1_Report/records/web" target="_blank" style="color:var(--yellow);">Zoho Forms → Report RMA</a>
+      </p>
+      <div class="upload-zone" id="zone-rma" onclick="document.getElementById('file-rma').click()">
+        <input type="file" id="file-rma" accept=".csv" onchange="handleFile('rma', this)"/>
+        <div class="icon">📄</div><p>Clique ou arraste o CSV do RMA</p>
+        <div class="filename" id="fname-rma"></div>
+      </div>
+      <button class="upload-btn" onclick="uploadFile('rma')">Enviar RMA</button>
+      <div id="status-rma" class="upload-status" style="display:none;"></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">🔩 Spare Parts — Google Sheets</div>
+      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">Exporte sua planilha de spare parts como CSV e faça upload aqui.</p>
+      <div class="upload-zone" id="zone-spare" onclick="document.getElementById('file-spare').click()">
+        <input type="file" id="file-spare" accept=".csv" onchange="handleFile('spare', this)"/>
+        <div class="icon">📊</div><p>Clique ou arraste o CSV de Spare Parts</p>
+        <div class="filename" id="fname-spare"></div>
+      </div>
+      <button class="upload-btn" onclick="uploadFile('spare')">Enviar Spare Parts</button>
+      <div id="status-spare" class="upload-status" style="display:none;"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">📦 Importações — Sankhya</div>
+      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">Exporte o relatório de importações do Sankhya como CSV e faça upload aqui.</p>
+      <div class="upload-zone" id="zone-sankhya" onclick="document.getElementById('file-sankhya').click()">
+        <input type="file" id="file-sankhya" accept=".csv" onchange="handleFile('sankhya', this)"/>
+        <div class="icon">🚢</div><p>Clique ou arraste o CSV do Sankhya</p>
+        <div class="filename" id="fname-sankhya"></div>
+      </div>
+      <button class="upload-btn" onclick="uploadFile('sankhya')">Enviar Sankhya</button>
+      <div id="status-sankhya" class="upload-status" style="display:none;"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">📡 Status das Fontes</div>
+      <div id="source-status" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+      <p style="font-size:11px;color:var(--gray2);margin-top:16px;">⚠️ Os dados de upload são armazenados temporariamente no servidor. Recomendamos refazer o upload semanalmente ou após deploy.</p>
+    </div>
+  </div>
+</div><!-- /tab-dados -->
 
 
+<!-- ═══ ABA: TÉCNICOS ═══ -->
+<div id="tab-tecnicos" class="tab-content">
+  <div class="section-header">Performance dos Técnicos</div>
 
+  <!-- KPIs -->
+  <div class="kpis" id="kpi-tecnicos"></div>
 
-app.use(express.static(path.join(__dirname, '../public')));
-module.exports = app;
+  <!-- Gráfico 1: Hoje -->
+  <div class="panel yellow" style="margin-bottom:16px;">
+    <div class="panel-title">Tickets Finalizados Hoje <span>por técnico</span></div>
+    <div style="position:relative;height:200px;"><canvas id="chart-tecnicos-hoje"></canvas></div>
+  </div>
+
+  <!-- Gráfico 2+3: Período com toggle Semana/Mês/Trimestre/Ano + Donut sincronizado -->
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel blue" style="margin-bottom:0;">
+      <div class="panel-title">
+        Tickets Finalizados por Período
+        <div style="display:flex;gap:5px;margin-left:auto;">
+          <button class="tec-periodo-btn active" onclick="setTecPeriodo('semana',this)">Semana</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('mes',this)">Mês</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('trimestre',this)">Trimestre</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('ano',this)">Ano</button>
+        </div>
+      </div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-periodo"></canvas></div>
+    </div>
+
+    <!-- Gráfico donut — sincronizado com o toggle -->
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title">Distribuição <span id="donut-tec-label">por semana</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-donut"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Tabela resumo por técnico × período -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Resumo por Técnico e Período</div>
+    <div style="overflow-x:auto;">
+      <table class="tbl" id="tbl-tecnicos" style="width:100%;">
+        <thead id="thead-tecnicos"></thead>
+        <tbody id="tbody-tecnicos"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tabela de tickets individuais — minimizável -->
+  <div class="panel" id="panel-tec-detalhes">
+    <div class="panel-title" style="cursor:pointer;" onclick="toggleTecDetalhes()">
+      Tickets Finalizados — Detalhes
+      <span style="margin-left:8px;font-size:11px;color:var(--gray2);">passou por: Aguardando laudo</span>
+      <span id="tec-detalhes-toggle-icon" style="margin-left:auto;font-size:16px;color:var(--gray2);">▼</span>
+    </div>
+    <div id="tec-detalhes-body">
+      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="filtro-tecnico" onchange="renderTecnicos()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:5px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+          <option value="">Todos os técnicos</option>
+        </select>
+      </div>
+      <div style="overflow-x:auto;max-height:380px;overflow-y:auto;">
+        <table class="tbl" id="tbl-tecnicos-tickets" style="width:100%;font-size:12px;">
+          <thead><tr>
+            <th>Ticket #</th><th>Técnico</th><th>Produto</th>
+            <th class="num">Data</th><th class="num">Horas no Laudo</th>
+          </tr></thead>
+          <tbody id="tbody-tecnicos-tickets"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-tecnicos -->
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
