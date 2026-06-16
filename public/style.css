@@ -240,6 +240,21 @@ main { padding: 24px; width: 100%; max-width: 100%; box-sizing: border-box; }
 .defeitos-empty .ico { font-size: 28px; opacity: 0.35; }
 .defeitos-empty p { font-size: 12px; max-width: 180px; line-height: 1.5; }
 
+/* ── Botões de período — aba Técnicos ──────── */
+.tec-periodo-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--gray2);
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font);
+  transition: all 0.2s;
+}
+.tec-periodo-btn:hover { border-color: var(--blue); color: var(--white); }
+.tec-periodo-btn.active { background: var(--blue); color: var(--white); border-color: var(--blue); font-weight: 600; }
+
 /* ── Animações ─────────────────────────────── */
 @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
 .fade-up { animation: fadeUp 0.2s ease; }
