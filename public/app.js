@@ -204,32 +204,8 @@ async function fetchDeskHistory(tickets) {
   if (historyLoading) return;
   historyLoading = true; historyLoaded = false;
 
-  // 1. Tenta carregar do cache do Supabase primeiro
-  try {
-    document.getElementById('last-update').textContent = '⏳ Carregando cache...';
-    const cacheRes  = await fetch('/api/history-cache');
-    const cacheData = await cacheRes.json();
-    if (cacheData.cache && Object.keys(cacheData.cache).length > 0) {
-      const cache = cacheData.cache;
-      let carregados = 0;
-      for (const [id, h] of Object.entries(cache)) {
-        if (!deskHistory[id] && h.statusTimes && Object.keys(h.statusTimes).length > 0) {
-          deskHistory[id] = h;
-          carregados++;
-        }
-      }
-      const meta = cacheData.meta;
-      const lastRun = meta?.lastRun ? new Date(meta.lastRun).toLocaleString('pt-BR') : '—';
-      document.getElementById('last-update').textContent = `✓ Cache: ${carregados} tickets (${lastRun})`;
-      console.log(`[cache] Carregados ${carregados} tickets do Supabase`);
-      // Renderiza com dados do cache imediatamente
-      renderSlaReport();
-      if (document.getElementById('tab-tecnicos')?.classList.contains('active')) renderTecnicos();
-      if (document.getElementById('tab-operacao')?.classList.contains('active') && window._lastReportData) renderOperacao(window._lastReportData);
-    }
-  } catch (e) {
-    console.warn('[cache] Falha ao carregar cache:', e.message);
-  }
+  // Cache já foi carregado em loadCacheFirst() antes dos tickets do Desk
+  // Aqui apenas buscamos os tickets novos que ainda não estão no cache
   const ticketMap = {}; for (const t of tickets) ticketMap[String(t.ticketNumber)] = t;
   const rmaRaw = window._rmaRaw || [], dataCorte = new Date('2025-01-01');
   const rmaFiltrado = rmaRaw.filter(r => { const d = parseDataBR(r.addedTime); return d && d >= dataCorte; });
@@ -300,6 +276,40 @@ async function loadReport() {
     renderAll(data); renderSlaReport();
   } catch (e) { console.error('Erro ao carregar report:', e); }
 }
+async function loadCacheFirst() {
+  // 1. Carrega cache do Supabase imediatamente — mostra dados sem esperar o Desk
+  try {
+    document.getElementById('last-update').textContent = '⏳ Carregando cache...';
+    const cacheRes  = await fetch('/api/history-cache');
+    const cacheData = await cacheRes.json();
+    if (cacheData.cache && Object.keys(cacheData.cache).length > 0) {
+      let carregados = 0;
+      for (const [id, h] of Object.entries(cacheData.cache)) {
+        if (!deskHistory[id] && h.statusTimes && Object.keys(h.statusTimes).length > 0) {
+          deskHistory[id] = h;
+          carregados++;
+        }
+      }
+      const meta = cacheData.meta;
+      const lastRun = meta?.lastRun ? new Date(meta.lastRun).toLocaleString('pt-BR') : '—';
+      document.getElementById('last-update').textContent = `✓ Cache: ${carregados} tickets (${lastRun})`;
+      // Renderiza SLA e Técnicos imediatamente com dados do cache
+      renderSlaReport();
+      if (document.getElementById('tab-tecnicos')?.classList.contains('active')) renderTecnicos();
+      if (document.getElementById('tab-operacao')?.classList.contains('active') && window._lastReportData) renderOperacao(window._lastReportData);
+    }
+  } catch (e) {
+    console.warn('[cache] Falha ao carregar cache:', e.message);
+  }
+
+  // 2. Carrega RMA/Spare Parts/Sankhya (rápido — vem do Supabase via /api/report)
+  await loadReport();
+
+  // 3. Busca tickets do Desk em background (lento — API do Zoho)
+  if (!deskLoaded && deskTickets.length === 0) fetchDeskPages();
+  else if (deskLoaded) renderSlaReport();
+}
+
 async function loadData() {
   await loadReport();
   if (!deskLoaded && deskTickets.length === 0) fetchDeskPages();
@@ -1012,4 +1022,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 setInterval(loadData, 2 * 60 * 60 * 1000);
 setPeriodAll();
-loadData();
+loadCacheFirst();
