@@ -112,7 +112,6 @@ async function getTicketHistory(ticketId, token) {
     if (hours > 0 && hours < 8760) statusTimes[sName] = (statusTimes[sName] || 0) + hours;
   }
 
-  // Técnico: proprietário no momento do laudo ou último comentário de técnico AST
   let assigneeName = null;
   if (passouPorLaudo) {
     const laudoEvent = statusChanges.find(s => s.status === 'Aguardando laudo');
@@ -137,115 +136,141 @@ async function getTicketHistory(ticketId, token) {
   return { statusTimes, statusChanges, passouPorLaudo, assigneeName, totalEvents: allEvents.length };
 }
 
-// ─── Endpoint principal do cron ──────────────────────────────────────
+// ─── Chama a si mesmo para continuar processamento ───────────────────
+async function continuarProcessamento(baseUrl, secret) {
+  try {
+    await axios.get(`${baseUrl}/api/cron-history?continuar=1`, {
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+      timeout: 5000
+    });
+  } catch {} // fire-and-forget
+}
+
+// ─── Endpoint principal ──────────────────────────────────────────────
 module.exports = async (req, res) => {
-  // Segurança: só aceita chamadas do próprio Vercel Cron ou com token
-  const authHeader = req.headers.authorization || '';
   const cronSecret = process.env.CRON_SECRET || '';
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  const authHeader = req.headers.authorization || '';
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && req.query.continuar !== '1') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const startTime = Date.now();
-  console.log(`[cron-history] Iniciando às ${new Date().toISOString()}`);
+  const startTime  = Date.now();
+  const isContinua = req.query.continuar === '1';
+  console.log(`[cron-history] ${isContinua ? 'Continuando' : 'Iniciando'} às ${new Date().toISOString()}`);
 
   try {
     const token = await getDeskToken();
 
-    // 1. Carrega histórico existente do Supabase
+    // Carrega estado atual do Supabase
     const existing = (await dbGet('desk_history_cache')) || {};
-    console.log(`[cron-history] Histórico existente: ${Object.keys(existing).length} tickets`);
+    const meta     = (await dbGet('desk_history_meta'))  || {};
 
-    // 2. Busca todos os tickets do Desk
+    // Busca todos os tickets do Desk (paginado)
     let allTickets = [];
     let from = 0;
     while (true) {
       await delay(200);
-      const res2 = await axios.get(
+      const r = await axios.get(
         `https://desk.zoho.com/api/v1/tickets?departmentId=${process.env.ZOHO_DEPT_ID}&limit=50&from=${from}&include=assignee&sortBy=-createdTime`,
         { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
       );
-      const batch = res2.data.data || [];
+      const batch = r.data.data || [];
       allTickets = allTickets.concat(batch);
       if (batch.length < 50) break;
       from += 50;
     }
-    console.log(`[cron-history] Total tickets Desk: ${allTickets.length}`);
 
-    // 3. Busca histórico de cada ticket — só os que mudaram desde o último cache
+    // Determina quais tickets precisam ser processados
+    // - Tickets novos (sem cache)
+    // - Tickets abertos modificados nas últimas 48h
+    // - Tickets que nunca tiveram histórico útil
+    const ontem = new Date(); ontem.setDate(ontem.getDate() - 2);
+    const pendentes = allTickets.filter(t => {
+      const jaTemCache    = !!existing[t.id];
+      const foiModificado = new Date(t.modifiedTime || t.createdTime) >= ontem;
+      const estaAberto    = t.statusType !== 'Closed';
+      if (!jaTemCache) return true;
+      if (estaAberto && foiModificado) return true;
+      return false;
+    });
+
+    console.log(`[cron-history] Total: ${allTickets.length} | Pendentes: ${pendentes.length} | Cache: ${Object.keys(existing).length}`);
+
+    // Se não tem nada pendente, encerra
+    if (pendentes.length === 0) {
+      await dbSet('desk_history_meta', { ...meta, lastRun: new Date().toISOString(), status: 'complete', totalTickets: allTickets.length, cacheSize: Object.keys(existing).length });
+      return res.json({ ok: true, status: 'complete', message: 'Nada a processar', cacheSize: Object.keys(existing).length });
+    }
+
+    // Processa lote até timeout
     let processed = 0, updated = 0, errors = 0;
     const newCache = { ...existing };
 
-    // Processa tickets em ordem do mais recente para o mais antigo
-    // Para tickets já no cache, só re-processa se foram modificados recentemente
-    const ontem = new Date(); ontem.setDate(ontem.getDate() - 1);
-
-    for (const t of allTickets) {
-      const id = t.id;
-      const modifiedTime = new Date(t.modifiedTime || t.createdTime);
-      const jaTemCache   = !!existing[id];
-      const foiModificado = modifiedTime >= ontem;
-
-      // Pula se já tem cache E não foi modificado nas últimas 24h E não está aberto
-      if (jaTemCache && !foiModificado && t.statusType === 'Closed') {
-        processed++;
-        continue;
-      }
-
+    for (const t of pendentes) {
       try {
-        const hist = await getTicketHistory(id, token);
+        const hist = await getTicketHistory(t.id, token);
         if (hist.statusTimes && Object.keys(hist.statusTimes).length > 0) {
-          newCache[id] = {
+          newCache[t.id] = {
             ...hist,
             ticketNumber: t.ticketNumber,
             createdTime:  t.createdTime,
-            closedTime:   t.closedTime  || null,
+            closedTime:   t.closedTime   || null,
             modifiedTime: t.modifiedTime || null,
             assigneeName: hist.assigneeName || t.assignee?.name || null
           };
           updated++;
         }
       } catch (e) {
-        console.error(`[cron-history] Erro ticket ${t.ticketNumber}:`, e.message);
+        console.error(`[cron-history] Erro #${t.ticketNumber}:`, e.message);
         errors++;
       }
 
       processed++;
-      if (processed % 20 === 0) {
-        console.log(`[cron-history] Progresso: ${processed}/${allTickets.length} | Atualizados: ${updated}`);
-        // Salva checkpoint a cada 20 tickets para não perder progresso
+
+      // Salva checkpoint a cada 15 tickets
+      if (processed % 15 === 0) {
         await dbSet('desk_history_cache', newCache);
+        console.log(`[cron-history] Checkpoint ${processed}/${pendentes.length}`);
       }
 
-      // Timeout de segurança: Vercel tem limite de 60s nas funções serverless
-      // Salva e encerra se estiver próximo do limite
-      if (Date.now() - startTime > 50000) {
-        console.log('[cron-history] Timeout preventivo — salvando progresso');
+      // Timeout preventivo: 48s
+      if (Date.now() - startTime > 48000) {
         await dbSet('desk_history_cache', newCache);
+        const restante = pendentes.length - processed;
+        console.log(`[cron-history] Timeout — restam ${restante} tickets`);
+
         await dbSet('desk_history_meta', {
+          ...meta,
           lastRun: new Date().toISOString(),
-          totalTickets: allTickets.length,
+          status: 'partial',
           processed, updated, errors,
-          status: 'partial'
+          restante,
+          cacheSize: Object.keys(newCache).length
         });
-        return res.json({ ok: true, status: 'partial', processed, updated, errors, totalTickets: allTickets.length });
+
+        // Responde primeiro, depois chama continuação
+        res.json({ ok: true, status: 'partial', processed, updated, errors, restante });
+
+        // Agenda próxima passada (fire-and-forget)
+        const baseUrl = `https://${req.headers.host}`;
+        continuarProcessamento(baseUrl, cronSecret);
+        return;
       }
     }
 
-    // 4. Salva cache final no Supabase
+    // Processamento completo
     await dbSet('desk_history_cache', newCache);
     await dbSet('desk_history_meta', {
       lastRun: new Date().toISOString(),
+      status: 'complete',
       totalTickets: allTickets.length,
       processed, updated, errors,
-      cacheSize: Object.keys(newCache).length,
-      status: 'complete'
+      cacheSize: Object.keys(newCache).length
     });
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[cron-history] Concluído em ${elapsed}s | Processados: ${processed} | Atualizados: ${updated} | Erros: ${errors}`);
-
-    res.json({ ok: true, status: 'complete', processed, updated, errors, totalTickets: allTickets.length, elapsed: `${elapsed}s` });
+    console.log(`[cron-history] Completo em ${elapsed}s | Atualizados: ${updated}`);
+    res.json({ ok: true, status: 'complete', processed, updated, errors, elapsed: `${elapsed}s`, cacheSize: Object.keys(newCache).length });
 
   } catch (e) {
     console.error('[cron-history] Erro fatal:', e.message);
