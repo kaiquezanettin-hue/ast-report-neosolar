@@ -594,5 +594,17 @@ app.get('/api/debug-ticket', async (req, res) => {
 
 
 
+
+// ─── Histórico em cache (salvo pelo cron) ────────────────────────────
+app.get('/api/history-cache', async (req, res) => {
+  try {
+    const cache = await dbGet('desk_history_cache');
+    const meta  = await dbGet('desk_history_meta');
+    res.json({ cache: cache || {}, meta: meta || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 module.exports = app;
