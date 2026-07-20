@@ -9,6 +9,7 @@ let prodSelecionado = null;
 let prodGarantiaFiltro = 'todos';
 let deskTickets = [], deskLoaded = false;
 let deskHistory = {}, historyLoading = false, historyLoaded = false;
+let sankhyaVendas = {}; // SKU → { sku, produto, quantidade, faturamento }
 
 // ── Paleta e constantes de cor ───────────────────────────────────────
 const C = {
@@ -85,7 +86,7 @@ function switchTab(id) {
   if (garantiaCount) garantiaCount.style.display  = isProdutos ? ''     : 'none';
   if (sep)           sep.style.display            = isProdutos ? ''     : 'none';
 
-  if (id === 'produtos' && window._lastReportData) setTimeout(() => renderProdutos(window._lastReportData), 80);
+  if (id === 'produtos' && window._lastReportData) { setTimeout(() => renderProdutos(window._lastReportData), 80); setTimeout(() => renderComparativoVendas(), 120); }
   if (id === 'sla' && typeof renderSlaReport === 'function') setTimeout(() => renderSlaReport(), 80);
   if (id === 'operacao' && window._lastReportData) setTimeout(() => renderOperacao(window._lastReportData), 80);
   if (id === 'tecnicos') setTimeout(() => renderTecnicos(), 80);
@@ -305,7 +306,10 @@ async function loadCacheFirst() {
   // 2. Carrega RMA/Spare Parts/Sankhya (rápido — vem do Supabase via /api/report)
   await loadReport();
 
-  // 3. Busca tickets do Desk em background (lento — API do Zoho)
+  // 3. Busca vendas Sankhya em background (paralelo com Desk)
+  fetchSankhyaVendas();
+
+  // 4. Busca tickets do Desk em background (lento — API do Zoho)
   if (!deskLoaded && deskTickets.length === 0) fetchDeskPages();
   else if (deskLoaded) renderSlaReport();
 }
@@ -1006,6 +1010,130 @@ function renderTecnicos() {
   }).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--gray2);padding:20px;">Sem dados</td></tr>';
 }
 
+
+
+// ════════════════════════════════════════════════════════════════════
+// SANKHYA VENDAS — busca via n8n e cruza com RMA pelo SKU
+// ════════════════════════════════════════════════════════════════════
+async function fetchSankhyaVendas() {
+  const from = document.getElementById('date-from').value;
+  const to   = document.getElementById('date-to').value;
+  if (!from || !to) return;
+  try {
+    const res  = await fetch(`/api/sankhya-vendas?from=${from}&to=${to}`);
+    const data = await res.json();
+    if (!data.ok) { console.warn('[sankhya-vendas]', data.error); return; }
+    // Indexa por SKU para cruzamento rápido
+    sankhyaVendas = {};
+    for (const item of data.data || []) {
+      sankhyaVendas[String(item.sku).trim()] = item;
+    }
+    console.log(`[sankhya-vendas] ${data.totalSkus} SKUs carregados`);
+    // Atualiza gráficos da aba Produtos se estiver ativa
+    if (window._lastReportData) renderComparativoVendas();
+  } catch (e) {
+    console.warn('[sankhya-vendas] erro:', e.message);
+  }
+}
+
+function renderComparativoVendas() {
+  const rmaRaw = window._rmaRawFull || window._rmaRaw || [];
+  const from   = new Date(document.getElementById('date-from').value);
+  const to     = new Date(document.getElementById('date-to').value); to.setHours(23,59,59);
+
+  // Agrupa RMA por SKU no período
+  const rmaPorSku = {};
+  for (const r of rmaRaw) {
+    const d = parseRmaDate(r.addedTime);
+    if (!d || d < from || d > to) continue;
+    const sku = String(r.sku || '').trim();
+    if (!sku || sku === '0') continue;
+    rmaPorSku[sku] = (rmaPorSku[sku] || 0) + 1;
+  }
+
+  // Cruza RMA × Vendas pelo SKU
+  const cruzamento = [];
+  const skusUnicos = new Set([...Object.keys(rmaPorSku), ...Object.keys(sankhyaVendas)]);
+  for (const sku of skusUnicos) {
+    const rmaQtd    = rmaPorSku[sku]    || 0;
+    const vendaInfo = sankhyaVendas[sku];
+    const vendaQtd  = vendaInfo?.quantidade || 0;
+    if (rmaQtd === 0 && vendaQtd === 0) continue;
+    const taxa = vendaQtd > 0 ? (rmaQtd / vendaQtd * 100) : null;
+    cruzamento.push({ sku, produto: vendaInfo?.produto || rmaPorSku[sku] && 'Sem cadastro Sankhya' || '—', rmaQtd, vendaQtd, taxa });
+  }
+  cruzamento.sort((a, b) => b.rmaQtd - a.rmaQtd);
+
+  const top = cruzamento.slice(0, 15);
+
+  // Gráfico comparativo RMA × Vendas
+  makeChart('chart-rma-vendas', {
+    type: 'bar',
+    data: {
+      labels: top.map(i => i.produto.length > 35 ? i.produto.substring(0, 35) + '…' : i.produto),
+      datasets: [
+        {
+          label: 'RMA (Retornos)',
+          data: top.map(i => i.rmaQtd),
+          backgroundColor: C.red,
+          borderRadius: 3
+        },
+        {
+          label: 'Vendas (Qtd)',
+          data: top.map(i => i.vendaQtd),
+          backgroundColor: C.blue,
+          borderRadius: 3
+        }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, color: C.white } },
+        tooltip: {
+          callbacks: {
+            afterLabel: ctx => {
+              const item = top[ctx.dataIndex];
+              return item.taxa !== null ? `Taxa retorno: ${item.taxa.toFixed(1)}%` : 'Sem vendas no período';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: C.gray2 } },
+        y: { ticks: { color: C.white, font: { size: 11 } } }
+      }
+    }
+  });
+
+  // Gráfico taxa de retorno (%)
+  const comTaxa = top.filter(i => i.taxa !== null && i.vendaQtd > 0);
+  makeChart('chart-taxa-retorno', {
+    type: 'bar',
+    data: {
+      labels: comTaxa.map(i => i.produto.length > 35 ? i.produto.substring(0, 35) + '…' : i.produto),
+      datasets: [{
+        label: 'Taxa de Retorno (%)',
+        data: comTaxa.map(i => parseFloat(i.taxa.toFixed(2))),
+        backgroundColor: comTaxa.map(i => i.taxa > 10 ? C.red : i.taxa > 5 ? C.orange : C.green),
+        borderRadius: 3
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.raw}% de retorno` } }
+      },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: C.gray2, callback: v => v + '%' } },
+        y: { ticks: { color: C.white, font: { size: 11 } } }
+      }
+    }
+  });
+}
 
 // ── Init ─────────────────────────────────────────────────────────────
 // Esconde filtro de garantia — só aparece na aba Produtos
