@@ -606,5 +606,82 @@ app.get('/api/history-cache', async (req, res) => {
   }
 });
 
+
+// ─── Sankhya Vendas via n8n ──────────────────────────────────────────
+// Busca faturamento por produto em múltiplas janelas de 60 dias
+app.get('/api/sankhya-vendas', async (req, res) => {
+  try {
+    const N8N_TOKEN = process.env.N8N_TOKEN;
+    if (!N8N_TOKEN) return res.status(500).json({ error: 'N8N_TOKEN não configurado' });
+
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios' });
+
+    const fromDate = new Date(from);
+    const toDate   = new Date(to);
+    const MAX_DIAS = 58; // margem de segurança abaixo de 60
+
+    // Divide o período em janelas de MAX_DIAS dias
+    const janelas = [];
+    let cur = new Date(fromDate);
+    while (cur <= toDate) {
+      const fim = new Date(cur);
+      fim.setDate(fim.getDate() + MAX_DIAS);
+      if (fim > toDate) fim.setTime(toDate.getTime());
+      janelas.push({
+        data_inicio: cur.toISOString().slice(0, 10),
+        data_fim:    fim.toISOString().slice(0, 10)
+      });
+      cur = new Date(fim);
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    // Busca cada janela com paginação
+    const todosItens = [];
+    for (const janela of janelas) {
+      let offset = 0;
+      while (true) {
+        await delay(200);
+        const r = await axios.post(
+          'https://n8n.neosolar.com.br/webhook/faturamento-por-produto',
+          { ...janela, offset, page_size: 5000 },
+          { headers: { Authorization: `Bearer ${N8N_TOKEN}`, 'Content-Type': 'application/json' }, timeout: 30000 }
+        );
+        const itens = r.data || [];
+        todosItens.push(...itens);
+        if (itens.length < 5000) break;
+        offset += 5000;
+      }
+    }
+
+    // Agrega por SKU
+    const porSku = {};
+    for (const item of todosItens) {
+      const sku = String(item.COD_SKU || '').trim();
+      if (!sku) continue;
+      if (!porSku[sku]) {
+        porSku[sku] = {
+          sku,
+          produto: item.PRODUTO || '',
+          quantidade: 0,
+          faturamento: 0
+        };
+      }
+      porSku[sku].quantidade  += Number(item.QUANTIDADE)        || 0;
+      porSku[sku].faturamento += Number(item.FATURAMENTO_BRUTO) || 0;
+    }
+
+    res.json({
+      ok: true,
+      totalItens: todosItens.length,
+      totalSkus: Object.keys(porSku).length,
+      data: Object.values(porSku).sort((a, b) => b.quantidade - a.quantidade)
+    });
+  } catch (e) {
+    console.error('[sankhya-vendas]', e.message);
+    res.status(500).json({ error: e.message, detail: e.response?.data });
+  }
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 module.exports = app;
