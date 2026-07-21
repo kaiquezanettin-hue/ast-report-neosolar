@@ -861,19 +861,27 @@ function minutosUteisDesde(desde) {
   // Início e fim do horário útil de hoje
   const inicioDiaHoje = new Date(agora);
   inicioDiaHoje.setHours(HORA_INI, 0, 0, 0);
+  inicioDiaHoje.setMinutes(0, 0, 0);
   const fimDiaHoje = new Date(agora);
   fimDiaHoje.setHours(HORA_FIM, 0, 0, 0);
+  fimDiaHoje.setMinutes(0, 0, 0);
 
   // Se ainda não chegou no horário útil, retorna 0
   if (agora <= inicioDiaHoje) return 0;
 
-  const livreDesde = new Date(desde);
+  // Garante que livre_desde é um Date válido
+  const livreDesde = desde instanceof Date ? desde : new Date(desde);
+  if (isNaN(livreDesde.getTime())) return 0;
+
+  console.log('[minutosUteisDesde] desde:', livreDesde.toISOString(), '| inicioDia:', inicioDiaHoje.toISOString());
 
   // Início efetivo: maior entre livre_desde e 09h de hoje
-  const inicioEfetivo = livreDesde > inicioDiaHoje ? livreDesde : inicioDiaHoje;
+  const inicioEfetivo = livreDesde.getTime() > inicioDiaHoje.getTime() ? livreDesde : inicioDiaHoje;
 
   // Fim efetivo: menor entre agora e 18h de hoje
-  const fimEfetivo = agora < fimDiaHoje ? agora : fimDiaHoje;
+  const fimEfetivo = agora.getTime() < fimDiaHoje.getTime() ? agora : fimDiaHoje;
+
+  console.log('[minutosUteisDesde] inicioEfetivo:', inicioEfetivo.toISOString(), '| fimEfetivo:', fimEfetivo.toISOString());
 
   if (fimEfetivo <= inicioEfetivo) return 0;
   return Math.floor((fimEfetivo - inicioEfetivo) / 60000);
