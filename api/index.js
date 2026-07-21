@@ -1,687 +1,394 @@
 const express = require('express');
 const axios = require('axios');
-const multer = require('multer');
-const csv = require('csv-parse/sync');
-const path = require('path');
-
+const cors = require('cors');
 const app = express();
-app.use(express.json({ limit: '50mb' }));
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+app.use(cors());
+app.use(express.json());
 
-// ─── Supabase ────────────────────────────────────────────────────────
-const SUPA_URL = process.env.SUPABASE_URL;
-const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const CLIENT_ID     = process.env.ZOHO_CLIENT_ID;
+const CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET;
+const REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN;
+const DEPT_ID       = process.env.ZOHO_DEPT_ID;
+const SUPA_URL      = process.env.SUPABASE_URL;
+const SUPA_KEY      = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function dbGet(key) {
+const productCache = {};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function getProductName(productId, token) {
+  if (!productId) return null;
+  if (productCache[productId]) return productCache[productId];
   try {
-    const res = await axios.get(
-      `${SUPA_URL}/rest/v1/ast_storage?key=eq.${encodeURIComponent(key)}&select=value,updated_at`,
-      { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
+    await sleep(150);
+    const r = await axios.get('https://desk.zoho.com/api/v1/products/' + productId,
+      { headers: { Authorization: 'Zoho-oauthtoken ' + token } });
+    const name = r.data.productName || r.data.name || null;
+    productCache[productId] = name;
+    return name;
+  } catch (e) { return null; }
+}
+
+let accessToken = '';
+let tokenExpiry = 0;
+
+async function getToken() {
+  if (Date.now() < tokenExpiry) return accessToken;
+  const r = await axios.post(
+    'https://accounts.zoho.com/oauth/v2/token' +
+    '?refresh_token=' + REFRESH_TOKEN +
+    '&client_id=' + CLIENT_ID +
+    '&client_secret=' + CLIENT_SECRET +
+    '&grant_type=refresh_token'
+  );
+  accessToken = r.data.access_token;
+  tokenExpiry = Date.now() + (55 * 60 * 1000);
+  return accessToken;
+}
+
+function normaliza(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+const STATUS_COM_HISTORICO = [
+  'aguardando teste', 'em teste', 'em manutencao',
+  'aguardando peca reposicao', 'em tratativa p/ devolucao cliente',
+  'aguardando aprovacao de manutencao', 'aguardando manutencao',
+  'aguardando laudo', 'em teste de estresse/ciclo', 'aguardando 1'
+];
+
+function precisaHistorico(status) {
+  const n = normaliza(status);
+  return STATUS_COM_HISTORICO.some(k => n.includes(k));
+}
+
+async function getStatusEntryTime(ticketId, currentStatus, token) {
+  try {
+    await sleep(150);
+    const r = await axios.get(
+      'https://desk.zoho.com/api/v1/tickets/' + ticketId + '/History',
+      { headers: { Authorization: 'Zoho-oauthtoken ' + token } }
     );
-    if (res.data && res.data.length > 0) {
-      return { value: JSON.parse(res.data[0].value), updated_at: res.data[0].updated_at };
-    }
-    return { value: null, updated_at: null };
-  } catch { return { value: null, updated_at: null }; }
-}
-
-async function dbSet(key, value) {
-  try {
-    await axios.post(`${SUPA_URL}/rest/v1/ast_storage`,
-      { key, value: JSON.stringify(value), updated_at: new Date().toISOString() },
-      {
-        headers: {
-          apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`,
-          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates'
-        }
-      }
-    );
-    return true;
-  } catch (e) { console.error('dbSet error:', e.message); return false; }
-}
-
-// ─── Memory cache ────────────────────────────────────────────────────
-let memCache = {
-  rma: { data: null, ts: 0, updated_at: null },
-  sankhya: { data: null, ts: 0, updated_at: null },
-  sheets: { data: null, ts: 0, updated_at: null },
-  stockMin: { data: {}, ts: 0 }
-};
-const MEM_TTL = 10 * 60 * 1000;
-const delay = ms => new Promise(r => setTimeout(r, ms));
-
-// ─── Zoho Auth ───────────────────────────────────────────────────────
-let zohoToken = { access_token: null, expires_at: 0 };
-
-async function getDeskToken() {
-  if (zohoToken.access_token && Date.now() < zohoToken.expires_at) return zohoToken.access_token;
-  const res = await axios.post('https://accounts.zoho.com/oauth/v2/token', null, {
-    params: {
-      refresh_token: process.env.ZOHO_REFRESH_TOKEN,
-      client_id: process.env.ZOHO_CLIENT_ID,
-      client_secret: process.env.ZOHO_CLIENT_SECRET,
-      grant_type: 'refresh_token'
-    }
-  });
-  zohoToken.access_token = res.data.access_token;
-  zohoToken.expires_at = Date.now() + (res.data.expires_in - 60) * 1000;
-  return zohoToken.access_token;
-}
-
-// ─── SLA map ─────────────────────────────────────────────────────────
-const SLA = {
-  'Aguardando Teste': 72, 'Ag. teste': 72,
-  'Em Teste': 6, 'Em teste': 6,
-  'Em Manutenção': 24, 'Em manutenção': 24,
-  'Aguardando Peça Reposição': 1080, 'Ag. Peça Reposição': 1080,
-  'Ag. Aprovação Manutenção SG': 48, 'Ag. aprovação manutenção (SG)': 48,
-  'Em Tratativa Devolução Cliente': 48, 'Em tratativa p/ devolução cliente': 48,
-  'Aguardando Manutenção SG': 24, 'Aguardando Laudo': 3
-};
-
-function getSlaStatus(status, hours) {
-  const sla = SLA[status];
-  if (!sla) return 'ok';
-  const pct = hours / sla;
-  if (pct >= 1) return 'vencido';
-  if (pct >= 0.75) return 'atencao';
-  return 'ok';
-}
-
-// ─── Desk tickets endpoint (paginado — 1 página por chamada) ─────────
-app.get('/api/desk-page', async (req, res) => {
-  try {
-    const from = parseInt(req.query.from) || 0;
-    const limit = 50;
-    const token = await getDeskToken();
-    const deptId = process.env.ZOHO_DEPT_ID;
-
-    await delay(150);
-    const response = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets?departmentId=${deptId}&limit=${limit}&from=${from}&include=assignee,contacts&sortBy=-createdTime`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
-
-    const allData = response.data.data || [];
-
-    // DEBUG: logar estrutura do primeiro ticket para inspecionar campos de agente
-    if (allData.length > 0 && parseInt(req.query.from) === 0) {
-      const sample = allData[0];
-      console.log('DESK-PAGE DEBUG ticket keys:', Object.keys(sample));
-      console.log('DESK-PAGE DEBUG assignee field:', JSON.stringify({
-        assignee: sample.assignee,
-        assigneeName: sample.assigneeName,
-        assigneeId: sample.assigneeId,
-        agent: sample.agent,
-        agentId: sample.agentId,
-        owner: sample.owner,
-        ownerId: sample.ownerId,
-      }));
-    }
-
-    const tickets = allData.map(t => ({
-      id: t.id,
-      ticketNumber: t.ticketNumber,
-      subject: t.subject,
-      status: t.status,
-      assigneeName: t.assignee?.name || t.assignee?.firstName || t.assigneeName || t.agent?.name || t.owner?.name || 'Sem agente',
-      createdTime: t.createdTime,
-      closedTime: t.closedTime || null,
-      modifiedTime: t.modifiedTime,
-      hoursInCurrentStatus: (Date.now() - new Date(t.modifiedTime || t.createdTime).getTime()) / 3600000,
-      totalHours: t.closedTime
-        ? (new Date(t.closedTime) - new Date(t.createdTime)) / 3600000
-        : (Date.now() - new Date(t.createdTime).getTime()) / 3600000
-    }));
-
-    res.json({
-      tickets,
-      hasMore: allData.length === limit,
-      nextFrom: from + limit,
-      debug: allData.length === 0 ? response.data : undefined
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data, status_code: e.response?.status });
-  }
-});
-
-// ─── Desk history endpoint (1 ticket por vez) ────────────────────────
-app.get('/api/desk-history', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-
-    const token = await getDeskToken();
-
-    // Paginação completa — Zoho retorna no máximo 50 eventos por vez
-    let allEvents = [];
-    let from = 0;
-    while (true) {
-      await delay(100);
-      const histRes = await axios.get(
-        `https://desk.zoho.com/api/v1/tickets/${ticketId}/History?limit=50&from=${from}`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      const batch = histRes.data.data || [];
-      allEvents = allEvents.concat(batch);
-      if (batch.length < 50) break;
-      from += 50;
-    }
-
-    const STATUS_IGNORADOS = new Set([
-      'Aguardando Chegada de Produto na Neosolar',
-      'Descarte', 'Produto despachado AST', 'Produto despachado',
-      'Aguardando Prazo / Autorização Descarte', 'Ag. Prazo / Autorização Descarte'
-    ]);
-
-    const TECNICOS_AST = ['marcos miceli', 'nathan magri', 'wendel correa', 'marcos', 'nathan', 'wendel'];
-    const statusChanges = [];
-    // Mapa de proprietário por timestamp: { time, owner }
-    const ownerChanges = [];
-    let passouPorLaudo = false;
-
-    for (const e of allEvents) {
+    const events = r.data.data || [];
+    const statusNorm = normaliza(currentStatus);
+    let firstBlankStatusTime = null;
+    for (const e of events) {
       if (!e.eventInfo) continue;
       for (const info of e.eventInfo) {
-        // Captura mudanças de Status
-        if (info.propertyName === 'Status') {
-          const val = info.propertyValue;
-          const toStatus = val?.updatedValue || (typeof val === 'string' ? val : null);
-          if (!toStatus) continue;
-          if (toStatus === 'Aguardando laudo') passouPorLaudo = true;
-          if (!STATUS_IGNORADOS.has(toStatus)) {
-            statusChanges.push({ status: toStatus, time: e.eventTime });
-          }
-        }
-        // Captura mudanças de Owner/Proprietário
-        if (info.propertyName === 'Owner' || info.propertyName === 'Assignee' ||
-            info.propertyName === 'ownerId' || info.propertyName === 'assigneeId') {
-          const val = info.propertyValue;
-          const newOwner = val?.updatedValue || val?.name || (typeof val === 'string' ? val : null);
-          if (newOwner) {
-            ownerChanges.push({ owner: newOwner, time: e.eventTime });
-          }
+        if (info.propertyName !== 'Status') continue;
+        const raw = info.propertyValue;
+        if (raw && raw.updatedValue) {
+          if (normaliza(raw.updatedValue) === statusNorm) return e.eventTime;
+        } else if (typeof raw === 'string' && raw !== '') {
+          if (normaliza(raw) === statusNorm) return e.eventTime;
+        } else if (firstBlankStatusTime === null) {
+          firstBlankStatusTime = e.eventTime;
         }
       }
     }
-
-    statusChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
-    ownerChanges.sort((a, b) => new Date(a.time) - new Date(b.time));
-
-    const statusTimes = {};
-    for (let i = 0; i < statusChanges.length; i++) {
-      const sName = statusChanges[i].status;
-      const start = new Date(statusChanges[i].time);
-      const end = i < statusChanges.length - 1
-        ? new Date(statusChanges[i + 1].time)
-        : new Date();
-      const hours = (end - start) / 3600000;
-      if (hours > 0 && hours < 8760) {
-        statusTimes[sName] = (statusTimes[sName] || 0) + hours;
-      }
-    }
-
-    // Encontra quem era o proprietário quando o ticket entrou em "Aguardando laudo"
-    let assigneeName = null;
-    if (passouPorLaudo) {
-      // Acha o timestamp da entrada em "Aguardando laudo"
-      const laudoEvent = statusChanges.find(s => s.status === 'Aguardando laudo');
-      if (laudoEvent && ownerChanges.length > 0) {
-        // Pega o proprietário mais recente ANTES ou NO MOMENTO do laudo
-        const laudoTime = new Date(laudoEvent.time);
-        const ownerNoLaudo = ownerChanges
-          .filter(o => new Date(o.time) <= laudoTime)
-          .pop(); // último antes do laudo
-        if (ownerNoLaudo) {
-          const ownerLower = ownerNoLaudo.owner.toLowerCase();
-          const eTecnico = TECNICOS_AST.some(t => ownerLower.includes(t));
-          if (eTecnico) assigneeName = ownerNoLaudo.owner;
-        }
-      }
-      // Fallback: último comentário de técnico AST no ticket
-      if (!assigneeName) {
-        for (const e of allEvents) {
-          const actorNome = e.actor?.name || '';
-          const actorLower = actorNome.toLowerCase();
-          if (e.eventName === 'CommentAdded' && TECNICOS_AST.some(t => actorLower.includes(t))) {
-            assigneeName = actorNome;
-            break; // allEvents é decrescente — primeiro encontrado = mais recente
-          }
-        }
-      }
-    }
-
-    res.json({ ticketId, assigneeName, passouPorLaudo, ownerChanges, statusTimes, statusChanges });
-  } catch (e) {
-    res.status(500).json({ error: e.message, ticketId: req.query.ticketId });
-  }
-});
-
-// ─── CSV Parsers ─────────────────────────────────────────────────────
-function parseRmaCsv(buffer) {
-  const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
-  return records.map(r => ({
-    fornecedor: r['Fornecedor'] || '',
-    deskNum: r['Desk #'] || '',
-    model: r['Model #'] || '',
-    sku: r['SKU'] || '',
-    fault: r['Fault description'] || '',
-    testDate: r['Test Date in the lab'] || '',
-    validation: r['Validation'] || '',
-    service: r['Service Performed'] || '',
-    skuComponents: r['SKU dos componentes consumidos no reparo'] || '',
-    componentModel: r['Model PCB / Component'] || '',
-    businessUnit: r['Business Unit'] || '',
-    addedTime: r['Added Time'] || '',
-    purchasedNeoSolar: r['Product purchased from neosolar?'] || '',
-    testLocation: r['Test location'] || ''
-  }));
+    return firstBlankStatusTime || null;
+  } catch (e) { return null; }
 }
 
-function parseSankhyaCsv(buffer) {
-  return csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
-}
+let ticketsCache = null;
+let ticketsCacheExpiry = 0;
 
-function parseSheetsCsv(buffer) {
-  const records = csv.parse(buffer, { columns: true, skip_empty_lines: true, trim: true });
-  return records.map(r => ({
-    fornecedor: r['Fornecedor'] || '',
-    categoria: r['Categoria'] || '',
-    sku: r['SKU'] || '',
-    modelo: r['Modelo'] || '',
-    quantidade: parseFloat(r['Quantidade']) || 0,
-    saida: parseFloat(r['Saida']) || 0,
-    totalFisico: parseFloat(r['Total Fisico']) || 0
-  })).filter(r => r.sku);
-}
-
-// ─── Supabase loader ─────────────────────────────────────────────────
-async function getFromDb(key, memKey) {
-  if (memCache[memKey].data && Date.now() - memCache[memKey].ts < MEM_TTL) return memCache[memKey];
-  const row = await dbGet(key);
-  if (row.value) {
-    const actualData = row.value && row.value.data !== undefined ? row.value.data : row.value;
-    const actualUpdatedAt = (row.value && row.value.updated_at) ? row.value.updated_at : row.updated_at;
-    memCache[memKey] = { data: actualData, ts: Date.now(), updated_at: actualUpdatedAt };
-  }
-  return memCache[memKey];
-}
-
-// ─── Upload routes ────────────────────────────────────────────────────
-app.post('/api/upload/rma', upload.single('file'), async (req, res) => {
+app.get('/tickets', async (req, res) => {
   try {
-    const data = parseRmaCsv(req.file.buffer);
-    const updated_at = new Date().toISOString();
-    await dbSet('rma', { data, updated_at });
-    memCache.rma = { data, ts: Date.now(), updated_at };
-    res.json({ ok: true, count: data.length, updated_at });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.post('/api/upload/sankhya', upload.single('file'), async (req, res) => {
-  try {
-    const data = parseSankhyaCsv(req.file.buffer);
-    const updated_at = new Date().toISOString();
-    await dbSet('sankhya', { data, updated_at });
-    memCache.sankhya = { data, ts: Date.now(), updated_at };
-    res.json({ ok: true, count: data.length, updated_at });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.post('/api/upload/spare-parts', upload.single('file'), async (req, res) => {
-  try {
-    const data = parseSheetsCsv(req.file.buffer);
-    const updated_at = new Date().toISOString();
-    await dbSet('spare_parts', { data, updated_at });
-    memCache.sheets = { data, ts: Date.now(), updated_at };
-    res.json({ ok: true, count: data.length, updated_at });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.post('/api/stock-min', async (req, res) => {
-  const current = (await dbGet('stock_min')).value || {};
-  const merged = { ...current, ...req.body };
-  await dbSet('stock_min', merged);
-  memCache.stockMin = { data: merged, ts: Date.now() };
-  res.json({ ok: true });
-});
-
-// ─── Report endpoint ──────────────────────────────────────────────────
-app.post('/api/report', async (req, res) => {
-  try {
-    const { from, to, tickets: allTickets = [] } = req.body;
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
-
-    const openTickets = allTickets.filter(t => !t.closedTime);
-    const periodTickets = allTickets.filter(t => {
-      const d = new Date(t.createdTime);
-      return d >= fromDate && d <= toDate;
-    });
-
-    const slaByStatus = {}, technicians = {};
-    for (const t of openTickets) {
-      const slaS = getSlaStatus(t.status, t.hoursInCurrentStatus || 0);
-      if (!slaByStatus[t.status]) slaByStatus[t.status] = { total: 0, ok: 0, atencao: 0, vencido: 0, totalHours: 0 };
-      slaByStatus[t.status].total++;
-      slaByStatus[t.status][slaS]++;
-      slaByStatus[t.status].totalHours += t.hoursInCurrentStatus || 0;
-      if (!technicians[t.assigneeName]) technicians[t.assigneeName] = { total: 0, ok: 0, atencao: 0, vencido: 0 };
-      technicians[t.assigneeName].total++;
-      technicians[t.assigneeName][slaS]++;
+    if (ticketsCache && Date.now() < ticketsCacheExpiry) {
+      return res.json({ tickets: ticketsCache });
     }
-
-    const monthlyTrend = {};
-    for (const t of periodTickets) {
-      const month = t.createdTime?.substring(0, 7) || 'N/A';
-      if (!monthlyTrend[month]) monthlyTrend[month] = { opened: 0, closed: 0 };
-      monthlyTrend[month].opened++;
-      if (t.closedTime) monthlyTrend[month].closed++;
+    const token = await getToken();
+    let all = [], start = 0;
+    while (true) {
+      const r = await axios.get(
+        'https://desk.zoho.com/api/v1/tickets?departmentId=' + DEPT_ID +
+        '&limit=50&from=' + start + '&include=assignee,contacts',
+        { headers: { Authorization: 'Zoho-oauthtoken ' + token } }
+      );
+      const data = r.data.data || [];
+      all = all.concat(data);
+      if (data.length < 50) break;
+      start += 50;
     }
-
-    const closedPeriod = periodTickets.filter(t => t.closedTime);
-    const avgTimeByAgent = {};
-    for (const t of closedPeriod) {
-      if (!avgTimeByAgent[t.assigneeName]) avgTimeByAgent[t.assigneeName] = { totalHours: 0, count: 0 };
-      avgTimeByAgent[t.assigneeName].totalHours += t.totalHours || 0;
-      avgTimeByAgent[t.assigneeName].count++;
-    }
-
-    const rmaCache = await getFromDb('rma', 'rma');
-    const rma = (rmaCache.data || []).filter(r => {
-      const d = new Date(r.testDate);
-      return d >= fromDate && d <= toDate;
-    });
-
-    const sankhyaCache  = await getFromDb('sankhya', 'sankhya');
-    const sheetsCache   = await getFromDb('spare_parts', 'sheets');
-    const stockMinCache = await getFromDb('stock_min', 'stockMin');
-    const stockMins = stockMinCache.data || {};
-    const spareParts = (sheetsCache.data || []).map(p => ({
-      ...p, minStock: stockMins[p.sku] || 0,
-      alert: p.quantidade <= (stockMins[p.sku] || 0) && (stockMins[p.sku] || 0) > 0
-    }));
-
-    const productCount = {}, faultCount = {}, lineCount = {}, serviceCount = {};
-    const warrantyCount = { warranty: 0, noWarranty: 0, noWarrantyMaint: 0 };
-    const componentConsumption = {}, monthlyConsumption = {};
-
-    for (const r of rma) {
-      const modelKey = r.model || 'Desconhecido';
-      if (!productCount[modelKey]) productCount[modelKey] = { count: 0, sku: r.sku, fornecedor: r.fornecedor };
-      productCount[modelKey].count++;
-      const faultCat = r.fault || 'Desconhecido';
-      faultCount[faultCat] = (faultCount[faultCat] || 0) + 1;
-      lineCount[r.fornecedor] = (lineCount[r.fornecedor] || 0) + 1;
-      serviceCount[r.service] = (serviceCount[r.service] || 0) + 1;
-      const v = r.validation.toLowerCase();
-      if (v.includes('no warranty maintenance')) warrantyCount.noWarrantyMaint++;
-      else if (v.includes('no warranty')) warrantyCount.noWarranty++;
-      else if (v.includes('warranty')) warrantyCount.warranty++;
-
-      if (r.skuComponents && r.skuComponents !== 'Sem SKU') {
-        const skus = r.skuComponents.split(',').map(s => s.trim()).filter(Boolean);
-        for (const sku of skus) {
-          if (!componentConsumption[sku]) componentConsumption[sku] = { count: 0, warranty: 0, noWarranty: 0, model: r.componentModel };
-          componentConsumption[sku].count++;
-          if (v.includes('no warranty')) componentConsumption[sku].noWarranty++;
-          else componentConsumption[sku].warranty++;
-        }
-        const month = r.testDate ? r.testDate.substring(3, 10) : 'N/A';
-        if (!monthlyConsumption[month]) monthlyConsumption[month] = {};
-        for (const sku of skus) {
-          if (!monthlyConsumption[month][sku]) monthlyConsumption[month][sku] = { total: 0, warranty: 0, noWarranty: 0 };
-          monthlyConsumption[month][sku].total++;
-          if (v.includes('no warranty')) monthlyConsumption[month][sku].noWarranty++;
-          else monthlyConsumption[month][sku].warranty++;
-        }
-      }
-    }
-
-    const testLocationCount = {};
-    for (const r of rma) {
-      const loc = (r.testLocation || 'Não informado').trim();
-      testLocationCount[loc] = (testLocationCount[loc] || 0) + 1;
-    }
-
-    const topProducts   = Object.entries(productCount).sort((a, b) => b[1].count - a[1].count).slice(0, 10).map(([model, d]) => ({ model, ...d }));
-    const topFaults     = Object.entries(faultCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([fault, count]) => ({ fault, count }));
-    const topComponents = Object.entries(componentConsumption).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([sku, d]) => ({ sku, ...d }));
-
-    const rmaAllCache = await getFromDb('rma', 'rma');
-    const rmaAll = rmaAllCache.data || [];
-    const rmaRaw = rmaAll;
-    const rmaRawFull = rmaAll;
-
-    function getTrimestre(dateStr) {
-      if (!dateStr) return null;
-      const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-      const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
-      if (m) {
-        const d = new Date(parseInt(m[3]), months[m[2]], parseInt(m[1]));
-        const q = Math.ceil((d.getMonth() + 1) / 3);
-        return `T${q} ${d.getFullYear()}`;
-      }
-      const d2 = new Date(dateStr);
-      if (!isNaN(d2)) {
-        const q = Math.ceil((d2.getMonth() + 1) / 3);
-        return `T${q} ${d2.getFullYear()}`;
-      }
-      return null;
-    }
-
-    function parseAddedTime(dateStr) {
-      if (!dateStr) return null;
-      const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-      const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
-      if (m) return new Date(parseInt(m[3]), months[m[2]], parseInt(m[1]));
-      const d = new Date(dateStr);
-      return isNaN(d) ? null : d;
-    }
-
-    const diffDias = (toDate - fromDate) / (1000 * 60 * 60 * 24);
-    const usarMes = diffDias <= 92;
-
-    function getPeriodo(dateStr) {
-      const trim = getTrimestre(dateStr);
-      if (!trim) return null;
-      if (usarMes) {
-        const m = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
-        const months = { Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12' };
-        if (m) return `${months[m[2]]}/${m[3]}`;
-        const d2 = new Date(dateStr);
-        if (!isNaN(d2)) return `${String(d2.getMonth()+1).padStart(2,'0')}/${d2.getFullYear()}`;
-        return null;
-      }
-      return trim;
-    }
-
-    const trimestralData = {};
-    for (const r of rmaAll) {
-      const rDate = parseAddedTime(r.addedTime);
-      if (!rDate || rDate < fromDate || rDate > toDate) continue;
-      const periodo = getPeriodo(r.addedTime);
-      if (!periodo) continue;
-      if (!trimestralData[periodo]) trimestralData[periodo] = { services: {}, warranty: 0, noWarranty: 0, maintenance: 0 };
-      const svc = r.service || '';
-      trimestralData[periodo].services[svc] = (trimestralData[periodo].services[svc] || 0) + 1;
-      const loc = (r.testLocation || 'Não informado').trim();
-      if (!trimestralData[periodo]._locations) trimestralData[periodo]._locations = {};
-      trimestralData[periodo]._locations[loc] = (trimestralData[periodo]._locations[loc] || 0) + 1;
-      const v = (r.validation || '').toLowerCase();
-      if (v.includes('no warranty maintenance')) trimestralData[periodo].maintenance++;
-      else if (v.includes('no warranty')) trimestralData[periodo].noWarranty++;
-      else if (v.includes('warranty')) trimestralData[periodo].warranty++;
-    }
-
-    res.json({
-      updatedAt: new Date().toISOString(),
-      desk: {
-        total: openTickets.length,
-        totalClosed: allTickets.filter(t => t.closedTime).length,
-        totalHistorico: periodTickets.length,
-        slaByStatus, byTechnician: technicians,
-        avgTimeByStatus: [],
-        avgTimeByAgent: Object.entries(avgTimeByAgent).map(([name, v]) => ({
-          name, avgHours: v.count > 0 ? v.totalHours / v.count : 0, count: v.count, closed: v.count
-        })).sort((a, b) => b.count - a.count),
-        monthlyTrend
-      },
-      rma: {
-        total: rma.length, topProducts, topFaults, lineCount, serviceCount,
-        warrantyCount, topComponents, monthlyConsumption,
-        raw: rmaRaw, rawFull: rmaRawFull,
-        trimestral: trimestralData, testLocation: testLocationCount
-      },
-      spareParts,
-      sankhya: (sankhyaCache.data || []).slice(0, 500),
-      dataStatus: {
-        desk: allTickets.length > 0,
-        rma: (rmaCache.data || []).length > 0,
-        sankhya: (sankhyaCache.data || []).length > 0,
-        spareParts: spareParts.length > 0
-      },
-      lastUpdated: {
-        rma: rmaCache.updated_at || null,
-        sankhya: sankhyaCache.updated_at || null,
-        spareParts: sheetsCache.updated_at || null
-      }
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── Status ───────────────────────────────────────────────────────────
-app.get('/api/status', async (req, res) => {
-  const rma     = await getFromDb('rma', 'rma');
-  const sankhya = await getFromDb('sankhya', 'sankhya');
-  const sheets  = await getFromDb('spare_parts', 'sheets');
-  res.json({
-    rma:     { loaded: !!(rma.data),     count: (rma.data     || []).length, updatedAt: rma.updated_at },
-    sankhya: { loaded: !!(sankhya.data), count: (sankhya.data || []).length, updatedAt: sankhya.updated_at },
-    sheets:  { loaded: !!(sheets.data),  count: (sheets.data  || []).length, updatedAt: sheets.updated_at }
-  });
-});
-
-
-// ─── DEBUG: ver estrutura bruta de um ticket ─────────────────────────
-app.get('/api/debug-ticket', async (req, res) => {
-  try {
-    const { ticketId } = req.query;
-    if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
-    const token = await getDeskToken();
-    await delay(150);
-    const r = await axios.get(
-      `https://desk.zoho.com/api/v1/tickets/${ticketId}?include=assignee,contacts,team`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    all = all.filter(t =>
+      t.statusType !== 'Closed' &&
+      normaliza(t.status) !== 'aguardando chegada de produto na neosolar'
     );
-    // Retorna o objeto completo para inspecionar os campos
-    res.json({
-      id: r.data.id,
-      ticketNumber: r.data.ticketNumber,
-      assignee: r.data.assignee,
-      assigneeName: r.data.assigneeName,
-      assigneeId: r.data.assigneeId,
-      allKeys: Object.keys(r.data),
-      raw: r.data
+    const seen = new Map();
+    all = all.filter(t => {
+      if (seen.has(t.ticketNumber)) return false;
+      seen.set(t.ticketNumber, true);
+      return true;
     });
+    for (const t of all.filter(t => precisaHistorico(t.status))) {
+      t.statusEntryTime = await getStatusEntryTime(t.id, t.status, token) || t.modifiedTime || null;
+    }
+    for (const t of all) {
+      t.productName = await getProductName(t.productId, token);
+    }
+    ticketsCache = all;
+    ticketsCacheExpiry = Date.now() + (55 * 1000);
+    res.json({ tickets: all });
   } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data });
+    res.status(500).json({ error: e.message, detail: e.response ? e.response.data : null });
   }
 });
 
-
-
-
-// ─── Histórico em cache (salvo pelo cron) ────────────────────────────
-app.get('/api/history-cache', async (req, res) => {
+app.get('/closed-today', async (req, res) => {
   try {
-    const cache = await dbGet('desk_history_cache');
-    const meta  = await dbGet('desk_history_meta');
-    res.json({ cache: cache || {}, meta: meta || null });
+    const token = await getToken();
+    let start = 0, count = 0;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    while (true) {
+      const r = await axios.get(
+        'https://desk.zoho.com/api/v1/tickets?departmentId=' + DEPT_ID +
+        '&limit=50&from=' + start + '&sortBy=closedTime',
+        { headers: { Authorization: 'Zoho-oauthtoken ' + token } }
+      );
+      const data = r.data.data || [];
+      const fechadosHoje = data.filter(t => t.closedTime && new Date(t.closedTime) >= today);
+      count += fechadosHoje.length;
+      if (data.length < 50 || fechadosHoje.length === 0) break;
+      start += 50;
+    }
+    res.json({ count });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
+// ── HELPERS SUPABASE ──
+function supaHeaders() {
+  return {
+    apikey: SUPA_KEY,
+    Authorization: 'Bearer ' + SUPA_KEY,
+    'Content-Type': 'application/json',
+    Prefer: 'resolution=merge-duplicates'
+  };
+}
 
-// ─── Sankhya Vendas via n8n ──────────────────────────────────────────
-// Busca faturamento por produto em múltiplas janelas de 60 dias
-app.get('/api/sankhya-vendas', async (req, res) => {
+function hojeDataBRT() {
+  const brt = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  return brt.toISOString().slice(0, 10);
+}
+
+// Calcula minutos úteis entre dois timestamps (seg-sex, 09h-18h BRT = UTC-3)
+// Abordagem simples: converte para BRT e opera em horário local BRT
+function minutosUteisEntre(desde, ate) {
+  if (!desde || !ate) return 0;
+  const BRT_OFFSET = 3 * 60 * 60 * 1000; // UTC-3 em ms
+  const inicio = new Date(new Date(desde).getTime() - BRT_OFFSET);
+  const fim    = new Date(new Date(ate).getTime()   - BRT_OFFSET);
+  if (fim <= inicio) return 0;
+
+  let total = 0;
+  let cursor = new Date(inicio);
+
+  while (cursor < fim) {
+    // getUTCDay() em BRT equivale ao dia local BRT
+    const diaSemana = cursor.getUTCDay(); // 0=dom, 6=sab
+    if (diaSemana !== 0 && diaSemana !== 6) {
+      // 09h e 18h em BRT (representados como UTC após subtrair offset)
+      const inicioUtil = new Date(cursor);
+      inicioUtil.setUTCHours(9, 0, 0, 0);
+      const fimUtil = new Date(cursor);
+      fimUtil.setUTCHours(18, 0, 0, 0);
+
+      const de   = cursor < inicioUtil ? inicioUtil : cursor;
+      const ate2 = fim < fimUtil ? fim : fimUtil;
+      if (ate2 > de) total += (ate2 - de) / 60000;
+    }
+    // Avança para próximo dia às 09h BRT
+    cursor = new Date(cursor);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    cursor.setUTCHours(9, 0, 0, 0);
+  }
+  return Math.floor(total);
+}
+
+// ── BANCADA OCIOSIDADE ──
+
+// Retorna o início do dia útil atual em BRT (09h00 BRT = 12h00 UTC)
+function inicioDiaUtilBRT() {
+  const brt = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const dataHoje = brt.toISOString().slice(0, 10);
+  // 09h BRT = 12h UTC
+  return new Date(dataHoje + 'T12:00:00.000Z');
+}
+
+// GET: retorna livre_desde + total acumulado do dia (base + período atual)
+// O período atual é limitado ao início do dia útil atual (09h BRT)
+app.get('/bancada-ocioso', async (req, res) => {
   try {
-    const N8N_TOKEN = process.env.N8N_TOKEN;
-    if (!N8N_TOKEN) return res.status(500).json({ error: 'N8N_TOKEN não configurado' });
+    const hoje = hojeDataBRT();
+    const [estadoRes, logRes] = await Promise.all([
+      axios.get(SUPA_URL + '/rest/v1/bancada_ociosidade?select=tecnico,livre_desde',
+        { headers: supaHeaders() }),
+      axios.get(SUPA_URL + '/rest/v1/bancada_ociosidade_log?select=tecnico,minutos_base,minutos_ociosos&data=eq.' + hoje,
+        { headers: supaHeaders() })
+    ]);
+    const estado = estadoRes.data || [];
+    const log    = logRes.data   || [];
+    const logMap = {};
+    log.forEach(r => { logMap[r.tecnico] = r; });
 
-    const { from, to } = req.query;
-    if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios' });
+    const agora = new Date().toISOString();
+    const inicioDia = inicioDiaUtilBRT();
 
-    const fromDate = new Date(from);
-    const toDate   = new Date(to);
-    const MAX_DIAS = 58; // margem de segurança abaixo de 60
+    const rows = estado.map(r => {
+      const logRow = logMap[r.tecnico] || null;
+      const base   = logRow ? (logRow.minutos_base || 0) : 0;
 
-    // Divide o período em janelas de MAX_DIAS dias
-    const janelas = [];
-    let cur = new Date(fromDate);
-    while (cur <= toDate) {
-      const fim = new Date(cur);
-      fim.setDate(fim.getDate() + MAX_DIAS);
-      if (fim > toDate) fim.setTime(toDate.getTime());
-      janelas.push({
-        data_inicio: cur.toISOString().slice(0, 10),
-        data_fim:    fim.toISOString().slice(0, 10)
-      });
-      cur = new Date(fim);
-      cur.setDate(cur.getDate() + 1);
-    }
-
-    // Busca cada janela com paginação
-    const todosItens = [];
-    for (const janela of janelas) {
-      let offset = 0;
-      while (true) {
-        await delay(200);
-        const r = await axios.post(
-          'https://n8n.neosolar.com.br/webhook/faturamento-por-produto',
-          { ...janela, offset, page_size: 5000 },
-          { headers: { Authorization: `Bearer ${N8N_TOKEN}`, 'Content-Type': 'application/json' }, timeout: 30000 }
-        );
-        const itens = r.data || [];
-        todosItens.push(...itens);
-        if (itens.length < 5000) break;
-        offset += 5000;
+      let periodoAtual = 0;
+      if (r.livre_desde) {
+        // Limita o início do período ao começo do dia útil atual
+        const livreDesde = new Date(r.livre_desde);
+        const inicioEfetivo = livreDesde < inicioDia ? inicioDia : livreDesde;
+        periodoAtual = minutosUteisEntre(inicioEfetivo.toISOString(), agora);
       }
-    }
 
-    // Agrega por SKU
-    const porSku = {};
-    for (const item of todosItens) {
-      const sku = String(item.COD_SKU || '').trim();
-      if (!sku) continue;
-      if (!porSku[sku]) {
-        porSku[sku] = {
-          sku,
-          produto: item.PRODUTO || '',
-          quantidade: 0,
-          faturamento: 0
-        };
-      }
-      porSku[sku].quantidade  += Number(item.QUANTIDADE)        || 0;
-      porSku[sku].faturamento += Number(item.FATURAMENTO_BRUTO) || 0;
-    }
-
-    res.json({
-      ok: true,
-      totalItens: todosItens.length,
-      totalSkus: Object.keys(porSku).length,
-      data: Object.values(porSku).sort((a, b) => b.quantidade - a.quantidade)
+      const minutos_hoje = base + periodoAtual;
+      // Retorna livre_desde original para o frontend mostrar, mas o cálculo é correto
+      return { tecnico: r.tecnico, livre_desde: r.livre_desde, minutos_hoje };
     });
-  } catch (e) {
-    console.error('[sankhya-vendas]', e.message);
-    res.status(500).json({ error: e.message, detail: e.response?.data });
+    res.json({ ociosidade: rows });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.use(express.static(path.join(__dirname, '../public')));
+// POST: técnico ficou disponível OU ficou ocupado
+app.post('/bancada-ocioso', async (req, res) => {
+  try {
+    const { tecnico, livre_desde, ocupado } = req.body;
+    if (!tecnico) return res.status(400).json({ error: 'tecnico required' });
+    const agora = new Date().toISOString();
+    const hoje  = hojeDataBRT();
+
+    if (ocupado) {
+      // Técnico ficou ocupado — consolida período no log e zera livre_desde
+      // Limita o início ao começo do dia útil atual
+      let minsInicio = livre_desde;
+      if (livre_desde) {
+        const ld = new Date(livre_desde);
+        const inicioDia = inicioDiaUtilBRT();
+        if (ld < inicioDia) minsInicio = inicioDia.toISOString();
+      }
+      const mins = minsInicio ? minutosUteisEntre(minsInicio, agora) : 0;
+
+      // Zera livre_desde e registra evento
+      await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade',
+        { tecnico, livre_desde: null, updated_at: agora },
+        { headers: supaHeaders() }
+      );
+      await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade_eventos',
+        { tecnico, evento: 'ocupado', timestamp: agora },
+        { headers: { ...supaHeaders(), Prefer: 'return=minimal' } }
+      ).catch(e => console.error('evento ocupado error:', e.message));
+
+      if (mins > 0) {
+        // Busca base atual do dia
+        const logRes = await axios.get(
+          SUPA_URL + '/rest/v1/bancada_ociosidade_log?select=minutos_base&tecnico=eq.' + tecnico + '&data=eq.' + hoje,
+          { headers: supaHeaders() }
+        );
+        const base = logRes.data && logRes.data[0] ? (logRes.data[0].minutos_base || 0) : 0;
+        const novaBase = base + mins;
+        await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade_log',
+          { tecnico, data: hoje, minutos_base: novaBase, minutos_ociosos: novaBase, updated_at: agora },
+          { headers: supaHeaders() }
+        );
+      }
+    } else {
+      // Técnico ficou disponível — salva livre_desde e registra evento
+      const ts = livre_desde || agora;
+      await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade',
+        { tecnico, livre_desde: ts, updated_at: agora },
+        { headers: supaHeaders() }
+      );
+      // Registra evento
+      await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade_eventos',
+        { tecnico, evento: 'disponivel', timestamp: ts },
+        { headers: { ...supaHeaders(), Prefer: 'return=minimal' } }
+      ).catch(e => console.error('evento disponivel error:', e.message));
+    }
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── BANCADA PRODUÇÃO ──
+
+async function supaGetProducao() {
+  try {
+    const hoje = hojeDataBRT();
+    const diaSemana = new Date().getDay();
+    const diasDesdeSegunda = diaSemana === 0 ? 6 : diaSemana - 1;
+    const inicioSemana = new Date(Date.now() - diasDesdeSegunda * 86400000);
+    const inicioSemanaStr = new Date(inicioSemana.getTime() - 3*60*60*1000).toISOString().slice(0,10);
+    const inicioMesStr = hoje.slice(0,7) + '-01';
+    const r = await axios.get(
+      SUPA_URL + '/rest/v1/bancada_producao_log?select=tecnico,data,produtos&data=gte.' + inicioMesStr,
+      { headers: supaHeaders() }
+    );
+    const rows = r.data || [];
+    const result = {};
+    rows.forEach(row => {
+      if (!result[row.tecnico]) result[row.tecnico] = { hoje: 0, semana: 0, mes: 0 };
+      if (row.data === hoje)             result[row.tecnico].hoje   += row.produtos;
+      if (row.data >= inicioSemanaStr)   result[row.tecnico].semana += row.produtos;
+      result[row.tecnico].mes += row.produtos;
+    });
+    return result;
+  } catch(e) { return {}; }
+}
+
+app.get('/bancada-producao', async (req, res) => {
+  try {
+    const producao = await supaGetProducao();
+    res.json({ producao });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/bancada-producao', async (req, res) => {
+  try {
+    const { tecnico, quantidade } = req.body;
+    if (!tecnico) return res.status(400).json({ error: 'tecnico required' });
+    const hoje = hojeDataBRT();
+    const r = await axios.get(
+      SUPA_URL + '/rest/v1/bancada_producao_log?select=produtos&tecnico=eq.' + tecnico + '&data=eq.' + hoje,
+      { headers: supaHeaders() }
+    );
+    const atual = r.data && r.data[0] ? r.data[0].produtos : 0;
+    await axios.post(SUPA_URL + '/rest/v1/bancada_producao_log',
+      { tecnico, data: hoje, produtos: atual + (quantidade || 1), updated_at: new Date().toISOString() },
+      { headers: supaHeaders() }
+    );
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /bancada-eventos — retorna log de eventos dos últimos 7 dias
+app.get('/bancada-eventos', async (req, res) => {
+  try {
+    const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const r = await axios.get(
+      SUPA_URL + '/rest/v1/bancada_ociosidade_eventos' +
+      '?select=tecnico,evento,timestamp' +
+      '&timestamp=gte.' + seteDiasAtras +
+      '&order=timestamp.desc' +
+      '&limit=200',
+      { headers: supaHeaders() }
+    );
+    res.json({ eventos: r.data || [] });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = app;
