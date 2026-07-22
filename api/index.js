@@ -157,7 +157,7 @@ app.get('/closed-today', async (req, res) => {
   }
 });
 
-// ── HELPERS SUPABASE ──
+// ── HELPERS ──
 function supaHeaders() {
   return {
     apikey: SUPA_KEY,
@@ -167,150 +167,188 @@ function supaHeaders() {
   };
 }
 
+// Data atual em BRT (YYYY-MM-DD)
 function hojeDataBRT() {
-  const brt = new Date(Date.now() - 3 * 60 * 60 * 1000);
-  return brt.toISOString().slice(0, 10);
+  return new Date(Date.now() - 3*60*60*1000).toISOString().slice(0, 10);
 }
 
-// Calcula minutos úteis entre dois timestamps (seg-sex, 09h-18h BRT = UTC-3)
-// Abordagem simples: converte para BRT e opera em horário local BRT
-function minutosUteisEntre(desde, ate) {
+// Início da semana atual (segunda) em BRT
+function inicioSemanaDataBRT() {
+  const agora = new Date(Date.now() - 3*60*60*1000);
+  const diaSemana = agora.getDay(); // 0=dom
+  const diasDesdeSegunda = diaSemana === 0 ? 6 : diaSemana - 1;
+  const seg = new Date(agora);
+  seg.setDate(agora.getDate() - diasDesdeSegunda);
+  return seg.toISOString().slice(0, 10);
+}
+
+// Calcula minutos úteis entre dois timestamps em BRT (09h-18h, seg-sex)
+// Recebe strings ISO UTC, converte para BRT internamente
+function minutosUteisBRT(desde, ate) {
   if (!desde || !ate) return 0;
-  const BRT_OFFSET = 3 * 60 * 60 * 1000; // UTC-3 em ms
-  const inicio = new Date(new Date(desde).getTime() - BRT_OFFSET);
-  const fim    = new Date(new Date(ate).getTime()   - BRT_OFFSET);
-  if (fim <= inicio) return 0;
+
+  // Converte para ms e aplica offset BRT (UTC-3)
+  const msDesde = new Date(desde).getTime() - 3*60*60*1000;
+  const msAte   = new Date(ate).getTime()   - 3*60*60*1000;
+  if (msAte <= msDesde) return 0;
 
   let total = 0;
-  let cursor = new Date(inicio);
+  // Cursor em ms BRT, começa no início do dia de 'desde'
+  let cursorMs = msDesde;
 
-  while (cursor < fim) {
-    // getUTCDay() em BRT equivale ao dia local BRT
-    const diaSemana = cursor.getUTCDay(); // 0=dom, 6=sab
-    if (diaSemana !== 0 && diaSemana !== 6) {
-      // 09h e 18h em BRT (representados como UTC após subtrair offset)
-      const inicioUtil = new Date(cursor);
-      inicioUtil.setUTCHours(9, 0, 0, 0);
-      const fimUtil = new Date(cursor);
-      fimUtil.setUTCHours(18, 0, 0, 0);
+  while (cursorMs < msAte) {
+    const cursorDate = new Date(cursorMs);
+    const diaSemana = cursorDate.getUTCDay(); // getUTCDay em BRT = dia correto
 
-      const de   = cursor < inicioUtil ? inicioUtil : cursor;
-      const ate2 = fim < fimUtil ? fim : fimUtil;
+    if (diaSemana !== 0 && diaSemana !== 6) { // seg-sex
+      // 09h e 18h em BRT = horas UTC do dia cursor
+      const ano  = cursorDate.getUTCFullYear();
+      const mes  = cursorDate.getUTCMonth();
+      const dia  = cursorDate.getUTCDate();
+      const ini9h  = Date.UTC(ano, mes, dia, 9,  0, 0); // 09h BRT em ms BRT
+      const fim18h = Date.UTC(ano, mes, dia, 18, 0, 0); // 18h BRT em ms BRT
+
+      const de  = Math.max(cursorMs, ini9h);
+      const ate2 = Math.min(msAte, fim18h);
       if (ate2 > de) total += (ate2 - de) / 60000;
     }
-    // Avança para próximo dia às 09h BRT
-    cursor = new Date(cursor);
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-    cursor.setUTCHours(9, 0, 0, 0);
+
+    // Avança para próximo dia às 00h BRT
+    const cursorDate2 = new Date(cursorMs);
+    cursorDate2.setUTCDate(cursorDate2.getUTCDate() + 1);
+    cursorDate2.setUTCHours(0, 0, 0, 0);
+    cursorMs = cursorDate2.getTime();
   }
+
   return Math.floor(total);
+}
+
+// Início do dia atual às 09h BRT em ISO UTC
+function inicio09hHojeBRT() {
+  const hoje = hojeDataBRT(); // YYYY-MM-DD em BRT
+  // 09h BRT = 12h UTC
+  return hoje + 'T12:00:00.000Z';
 }
 
 // ── BANCADA OCIOSIDADE ──
 
-// Retorna o início do dia útil atual em BRT (09h00 BRT = 12h00 UTC)
-function inicioDiaUtilBRT() {
-  const brt = new Date(Date.now() - 3 * 60 * 60 * 1000);
-  const dataHoje = brt.toISOString().slice(0, 10);
-  // 09h BRT = 12h UTC
-  return new Date(dataHoje + 'T12:00:00.000Z');
-}
-
-// GET: retorna livre_desde + total acumulado do dia (base + período atual)
-// O período atual é limitado ao início do dia útil atual (09h BRT)
+// GET /bancada-ocioso
+// Retorna para cada técnico:
+//   livre_desde: timestamp de quando ficou disponível
+//   mins_desde:  minutos úteis desde que ficou disponível (período atual)
+//   mins_hoje:   minutos úteis disponível hoje (base gravada + período atual)
+//   mins_semana: minutos úteis disponível na semana (base gravada + período atual)
 app.get('/bancada-ocioso', async (req, res) => {
   try {
-    const hoje = hojeDataBRT();
+    const hoje        = hojeDataBRT();
+    const inicioSemana = inicioSemanaDataBRT();
+    const agora       = new Date().toISOString();
+    const ini09h      = inicio09hHojeBRT();
+
     const [estadoRes, logRes] = await Promise.all([
       axios.get(SUPA_URL + '/rest/v1/bancada_ociosidade?select=tecnico,livre_desde',
         { headers: supaHeaders() }),
-      axios.get(SUPA_URL + '/rest/v1/bancada_ociosidade_log?select=tecnico,minutos_base,minutos_ociosos&data=eq.' + hoje,
+      axios.get(SUPA_URL + '/rest/v1/bancada_ociosidade_log?select=tecnico,data,minutos_base,minutos_base_semana&data=gte.' + inicioSemana,
         { headers: supaHeaders() })
     ]);
-    const estado = estadoRes.data || [];
-    const log    = logRes.data   || [];
-    const logMap = {};
-    log.forEach(r => { logMap[r.tecnico] = r; });
 
-    const agora = new Date().toISOString();
-    const inicioDia = inicioDiaUtilBRT();
+    const estado = estadoRes.data || [];
+    const logs   = logRes.data   || [];
+
+    // Monta mapas: base_hoje e base_semana por técnico
+    const baseHoje   = {};
+    const baseSemana = {};
+    logs.forEach(r => {
+      if (!baseSemana[r.tecnico]) baseSemana[r.tecnico] = 0;
+      baseSemana[r.tecnico] += (r.minutos_base_semana || r.minutos_base || 0);
+      if (r.data === hoje) {
+        baseHoje[r.tecnico] = r.minutos_base || 0;
+      }
+    });
 
     const rows = estado.map(r => {
-      const logRow = logMap[r.tecnico] || null;
-      const base   = logRow ? (logRow.minutos_base || 0) : 0;
+      const ld = r.livre_desde;
+      let mins_desde = 0, mins_hoje_periodo = 0, mins_semana_periodo = 0;
 
-      let periodoAtual = 0;
-      if (r.livre_desde) {
-        // Limita o início do período ao começo do dia útil atual
-        const livreDesde = new Date(r.livre_desde);
-        const inicioEfetivo = livreDesde < inicioDia ? inicioDia : livreDesde;
-        periodoAtual = minutosUteisEntre(inicioEfetivo.toISOString(), agora);
+      if (ld) {
+        // Período atual desde que ficou disponível
+        mins_desde = minutosUteisBRT(ld, agora);
+        // Período atual limitado a hoje (09h até agora)
+        const inicioEfetivoHoje = ld > ini09h ? ld : ini09h;
+        mins_hoje_periodo   = minutosUteisBRT(inicioEfetivoHoje, agora);
+        // Período atual para a semana (desde segunda ou desde que ficou disponível)
+        const inicioEfetivoSemana = ld > (inicioSemana + 'T12:00:00.000Z') ? ld : (inicioSemana + 'T12:00:00.000Z');
+        mins_semana_periodo = minutosUteisBRT(inicioEfetivoSemana, agora);
       }
 
-      const minutos_hoje = base + periodoAtual;
-      // Retorna livre_desde original para o frontend mostrar, mas o cálculo é correto
-      return { tecnico: r.tecnico, livre_desde: r.livre_desde, minutos_hoje };
+      return {
+        tecnico:     r.tecnico,
+        livre_desde: ld,
+        mins_desde,
+        mins_hoje:   (baseHoje[r.tecnico]   || 0) + mins_hoje_periodo,
+        mins_semana: (baseSemana[r.tecnico]  || 0) + mins_semana_periodo
+      };
     });
+
     res.json({ ociosidade: rows });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST: técnico ficou disponível OU ficou ocupado
+// POST /bancada-ocioso
 app.post('/bancada-ocioso', async (req, res) => {
   try {
     const { tecnico, livre_desde, ocupado } = req.body;
     if (!tecnico) return res.status(400).json({ error: 'tecnico required' });
     const agora = new Date().toISOString();
     const hoje  = hojeDataBRT();
+    const inicioSemana = inicioSemanaDataBRT();
+    const ini09h = inicio09hHojeBRT();
 
-    if (ocupado) {
-      // Técnico ficou ocupado — consolida período no log e zera livre_desde
-      // Limita o início ao começo do dia útil atual
-      let minsInicio = livre_desde;
-      if (livre_desde) {
-        const ld = new Date(livre_desde);
-        const inicioDia = inicioDiaUtilBRT();
-        if (ld < inicioDia) minsInicio = inicioDia.toISOString();
-      }
-      const mins = minsInicio ? minutosUteisEntre(minsInicio, agora) : 0;
+    if (ocupado && livre_desde) {
+      // Consolida período encerrado no log
+      const inicioEfetivoHoje   = livre_desde > ini09h ? livre_desde : ini09h;
+      const inicioEfetivoSemana = livre_desde > (inicioSemana + 'T12:00:00.000Z') ? livre_desde : (inicioSemana + 'T12:00:00.000Z');
+      const minsHoje   = minutosUteisBRT(inicioEfetivoHoje, agora);
+      const minsSemana = minutosUteisBRT(inicioEfetivoSemana, agora);
 
-      // Zera livre_desde e registra evento
+      // Zera livre_desde
       await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade',
         { tecnico, livre_desde: null, updated_at: agora },
         { headers: supaHeaders() }
       );
+
+      // Registra evento
       await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade_eventos',
         { tecnico, evento: 'ocupado', timestamp: agora },
         { headers: { ...supaHeaders(), Prefer: 'return=minimal' } }
-      ).catch(e => console.error('evento ocupado error:', e.message));
+      ).catch(() => {});
 
-      if (mins > 0) {
-        // Busca base atual do dia
+      if (minsHoje > 0 || minsSemana > 0) {
         const logRes = await axios.get(
-          SUPA_URL + '/rest/v1/bancada_ociosidade_log?select=minutos_base&tecnico=eq.' + tecnico + '&data=eq.' + hoje,
+          SUPA_URL + '/rest/v1/bancada_ociosidade_log?select=minutos_base,minutos_base_semana&tecnico=eq.' + tecnico + '&data=eq.' + hoje,
           { headers: supaHeaders() }
         );
-        const base = logRes.data && logRes.data[0] ? (logRes.data[0].minutos_base || 0) : 0;
-        const novaBase = base + mins;
+        const row = logRes.data && logRes.data[0] ? logRes.data[0] : null;
+        const baseHoje   = row ? (row.minutos_base         || 0) : 0;
+        const baseSemana = row ? (row.minutos_base_semana   || 0) : 0;
         await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade_log',
-          { tecnico, data: hoje, minutos_base: novaBase, minutos_ociosos: novaBase, updated_at: agora },
+          { tecnico, data: hoje, minutos_base: baseHoje + minsHoje, minutos_base_semana: baseSemana + minsSemana, updated_at: agora },
           { headers: supaHeaders() }
         );
       }
     } else {
-      // Técnico ficou disponível — salva livre_desde e registra evento
+      // Técnico ficou disponível
       const ts = livre_desde || agora;
       await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade',
         { tecnico, livre_desde: ts, updated_at: agora },
         { headers: supaHeaders() }
       );
-      // Registra evento
       await axios.post(SUPA_URL + '/rest/v1/bancada_ociosidade_eventos',
         { tecnico, evento: 'disponivel', timestamp: ts },
         { headers: { ...supaHeaders(), Prefer: 'return=minimal' } }
-      ).catch(e => console.error('evento disponivel error:', e.message));
+      ).catch(() => {});
     }
     res.json({ ok: true });
   } catch(e) {
@@ -319,17 +357,13 @@ app.post('/bancada-ocioso', async (req, res) => {
 });
 
 // ── BANCADA PRODUÇÃO ──
-
-async function supaGetProducao() {
+app.get('/bancada-producao', async (req, res) => {
   try {
     const hoje = hojeDataBRT();
-    const diaSemana = new Date().getDay();
-    const diasDesdeSegunda = diaSemana === 0 ? 6 : diaSemana - 1;
-    const inicioSemana = new Date(Date.now() - diasDesdeSegunda * 86400000);
-    const inicioSemanaStr = new Date(inicioSemana.getTime() - 3*60*60*1000).toISOString().slice(0,10);
-    const inicioMesStr = hoje.slice(0,7) + '-01';
+    const inicioSemana = inicioSemanaDataBRT();
+    const inicioMes = hoje.slice(0,7) + '-01';
     const r = await axios.get(
-      SUPA_URL + '/rest/v1/bancada_producao_log?select=tecnico,data,produtos&data=gte.' + inicioMesStr,
+      SUPA_URL + '/rest/v1/bancada_producao_log?select=tecnico,data,produtos&data=gte.' + inicioMes,
       { headers: supaHeaders() }
     );
     const rows = r.data || [];
@@ -337,17 +371,10 @@ async function supaGetProducao() {
     rows.forEach(row => {
       if (!result[row.tecnico]) result[row.tecnico] = { hoje: 0, semana: 0, mes: 0 };
       if (row.data === hoje)             result[row.tecnico].hoje   += row.produtos;
-      if (row.data >= inicioSemanaStr)   result[row.tecnico].semana += row.produtos;
+      if (row.data >= inicioSemana)      result[row.tecnico].semana += row.produtos;
       result[row.tecnico].mes += row.produtos;
     });
-    return result;
-  } catch(e) { return {}; }
-}
-
-app.get('/bancada-producao', async (req, res) => {
-  try {
-    const producao = await supaGetProducao();
-    res.json({ producao });
+    res.json({ producao: result });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -373,16 +400,12 @@ app.post('/bancada-producao', async (req, res) => {
   }
 });
 
-// GET /bancada-eventos — retorna log de eventos dos últimos 7 dias
+// ── EVENTOS ──
 app.get('/bancada-eventos', async (req, res) => {
   try {
-    const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const seteDiasAtras = new Date(Date.now() - 7*24*60*60*1000).toISOString();
     const r = await axios.get(
-      SUPA_URL + '/rest/v1/bancada_ociosidade_eventos' +
-      '?select=tecnico,evento,timestamp' +
-      '&timestamp=gte.' + seteDiasAtras +
-      '&order=timestamp.desc' +
-      '&limit=200',
+      SUPA_URL + '/rest/v1/bancada_ociosidade_eventos?select=tecnico,evento,timestamp&timestamp=gte.' + seteDiasAtras + '&order=timestamp.desc&limit=200',
       { headers: supaHeaders() }
     );
     res.json({ eventos: r.data || [] });
