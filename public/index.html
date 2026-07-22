@@ -1,1444 +1,629 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AST NeoSolar — Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=Barlow+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg:           #1c1e20;
-    --surface:      #242628;
-    --surface2:     #2a2c2e;
-    --border:       #2e3032;
-    --border2:      #3a3c3e;
-    --amarelo:      #FFD04C;
-    --amarelo-dim:  #c9a43b;
-    --text:         #e8e8e8;
-    --text-sub:     #888;
-    --text-muted:   #555;
-    --verde:        #4caf6e;
-    --verde-bg:     rgba(76,175,110,0.12);
-    --yellow-bg:    rgba(255,208,76,0.12);
-    --vermelho:     #e05c52;
-    --vermelho-bg:  rgba(224,92,82,0.12);
-    --azul:         #6db3f2;
-    --roxo:         #c49bff;
-    --laranja:      #ffb366;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Barlow', sans-serif;
-    font-size: 14px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* ── HEADER ── */
-  header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 52px;
-    flex-shrink: 0;
-  }
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  header img { height: 28px; width: auto; }
-  .header-sep { color: var(--border2); font-size: 1.2rem; font-weight: 300; margin: 0 2px; }
-  header h1 {
-    font-family: 'Barlow', sans-serif;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--text);
-    letter-spacing: 0.2px;
-  }
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-  #clock { font-size: 0.82rem; color: var(--text-sub); letter-spacing: 0.5px; }
-  #last-update { font-size: 0.72rem; color: var(--text-muted); }
-
-  /* ── KPIS ── */
-  .kpis {
-    display: flex;
-    gap: 4px;
-    padding: 5px 20px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .kpi {
-    flex: 1;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 5px 8px;
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 60px;
-  }
-  .kpi .val {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 1.1rem;
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0.5px;
-  }
-  .kpi .lbl {
-    font-size: 0.62rem;
-    color: var(--text-sub);
-    font-weight: 400;
-    white-space: nowrap;
-  }
-  .kpi.total .val  { color: var(--amarelo); }
-  .kpi.blue .val   { color: var(--azul); }
-  .kpi.green .val  { color: var(--verde); }
-  .kpi.red .val    { color: var(--vermelho); }
-  .kpi.yellow .val { color: var(--amarelo); }
-  .kpi.purple .val { color: var(--roxo); }
-  .kpi.gray .val   { color: var(--text-sub); }
-
-  /* ── BANCADA ── */
-  .bancada {
-    display: flex;
-    gap: 6px;
-    padding: 6px 20px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .bancada-card {
-    flex: 1;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--border2);
-    border-radius: 6px;
-    padding: 8px 14px;
-    min-height: 0;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-    overflow: hidden;
-    transition: border-left-color 0.25s;
-  }
-  .bancada-card.ocupado { border-left-color: var(--amarelo); }
-  .bancada-nome {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: var(--amarelo);
-    text-transform: uppercase;
-    letter-spacing: 1.2px;
-  }
-
-  .bancada-status.disponivel {
-    font-size: 0.72rem;
-    color: var(--verde);
-    font-weight: 400;
-  }
-  .bancada-ticket { font-size: 0.76rem; font-weight: 600; color: var(--text); }
-  .bancada-produto { font-size: 0.7rem; color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bancada-statusbadge { font-size: 0.62rem; color: var(--text-muted); margin-top: 1px; }
-  .bancada-ocioso-wrap {
-    margin-left: auto;
-    text-align: right;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    flex-shrink: 0;
-    opacity: 0.45;
-  }
-  .bancada-ocioso-wrap:hover { opacity: 1; transition: opacity 0.2s; }
-  .bancada-ocioso {
-    font-size: 0.55rem;
-    color: var(--text-muted);
-    font-style: italic;
-    line-height: 1.4;
-  }
-  .bancada-ocioso.alerta { color: var(--amarelo); }
-
-  /* ── TABS MOBILE ── */
-  .tabs {
-    display: none;
-    overflow-x: auto;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0 16px;
-    flex-shrink: 0;
-  }
-  .tabs::-webkit-scrollbar { height: 0; }
-  .tab-btn {
-    padding: 10px 14px;
-    font-family: 'Barlow', sans-serif;
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: var(--text-sub);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .tab-btn.active { color: var(--text); border-bottom-color: var(--amarelo); }
-  .tab-btn .tab-count {
-    background: var(--border2);
-    border-radius: 10px;
-    padding: 1px 6px;
-    font-size: 0.62rem;
-    margin-left: 4px;
-    color: var(--text-sub);
-  }
-
-  /* ── GRID ── */
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(9, 1fr);
-    gap: 6px;
-    padding: 10px 20px;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  .col {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left-width: 2px;
-    border-radius: 6px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  .col.contato { border-left-color: var(--azul); }
-  .col.contato .col-header { color: var(--azul); }
-  .col.teste   { border-left-color: var(--roxo); }
-  .col.emteste { border-left-color: var(--azul); }
-  .col.estresse { border-left-color: #f0a050; }
-  .col.manut   { border-left-color: #ff8c85; }
-  .col.peca    { border-left-color: var(--amarelo); }
-  .col.aprov   { border-left-color: var(--laranja); }
-  .col.dev     { border-left-color: var(--vermelho); }
-  .col.sg      { border-left-color: #d4b3ff; }
-
-  .col-header {
-    padding: 8px 10px;
-    font-family: 'Barlow', sans-serif;
-    font-size: 0.68rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .col.teste   .col-header { color: var(--roxo); }
-  .col.emteste .col-header { color: var(--azul); }
-  .col.estresse .col-header { color: #f0a050; }
-  .col.manut   .col-header { color: #ff8c85; }
-  .col.peca    .col-header { color: var(--amarelo); }
-  .col.aprov   .col-header { color: var(--laranja); }
-  .col.dev     .col-header { color: var(--vermelho); }
-  .col.sg      .col-header { color: #d4b3ff; }
-
-  .col-header .count {
-    background: var(--border);
-    border-radius: 10px;
-    padding: 1px 6px;
-    font-size: 0.68rem;
-    color: var(--text-sub);
-    font-weight: 600;
-    margin-left: 4px;
-    flex-shrink: 0;
-  }
-
-  .col-stats {
-    display: flex;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    flex-shrink: 0;
-    gap: 2px;
-  }
-  .col-stat { flex: 1; text-align: center; }
-  .col-stat .sv {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-  }
-  .col-stat .sl { color: var(--text-muted); font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 500; }
-  .col-stat.total .sv { color: var(--text); }
-  .col-stat.ok .sv    { color: var(--verde); }
-  .col-stat.warn .sv  { color: var(--amarelo); }
-  .col-stat.over .sv  { color: var(--vermelho); }
-
-  .col-body {
-    flex: 1;
-    overflow-y: scroll;
-    padding: 5px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-  .col-body::-webkit-scrollbar { width: 0px; }
-  .col-body::-webkit-scrollbar-thumb { background: transparent; }
-
-  .ticket-card {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 6px 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 6px;
-    transition: background 0.12s, border-color 0.12s;
-  }
-  .ticket-card:hover { background: var(--border); border-color: var(--border2); }
-
-  .ticket-info { flex: 1; min-width: 0; }
-  .ticket-rank { font-size: 0.54rem; color: var(--text-muted); margin-bottom: 1px; font-weight: 500; }
-  .ticket-title {
-    font-size: 0.72rem;
-    font-weight: 500;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .ticket-agent {
-    font-size: 0.6rem;
-    color: var(--azul);
-    margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-weight: 500;
-  }
-  .ticket-product {
-    font-size: 0.6rem;
-    color: var(--text-sub);
-    margin-top: 1px;
-    white-space: nowrap;
-    overflow: hidden;
-    position: relative;
-  }
-  .ticket-product span {
-    display: inline-block;
-    white-space: nowrap;
-  }
-  .ticket-product span.scrolling {
-    animation: marquee 18s linear infinite;
-    padding-right: 32px;
-  }
-  @keyframes marquee {
-    0%   { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
-  }
-  .ticket-time {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 0.74rem;
-    font-weight: 700;
-    border-radius: 3px;
-    padding: 2px 6px;
-    flex-shrink: 0;
-    white-space: nowrap;
-    letter-spacing: 0.3px;
-  }
-  .time-green  { background: var(--verde-bg);    color: var(--verde); }
-  .time-yellow { background: var(--yellow-bg);   color: var(--amarelo); }
-  .time-red    { background: var(--vermelho-bg); color: var(--vermelho); }
-  .time-none   { color: var(--text-muted); font-size: 0.62rem; }
-
-  .empty   { color: var(--text-muted); font-size: 0.72rem; text-align: center; padding: 16px 0; }
-  .loading { color: var(--text-muted); font-size: 0.78rem; text-align: center; padding: 30px; }
-
-  /* ── MODAL DIAGNÓSTICO ── */
-  .diag-overlay {
-    display: none;
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Report AST — NeoSolar</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20242.52%20454.71%22%3E%3Crect%20width%3D%22242.52%22%20height%3D%22454.71%22%20rx%3D%2240%22%20fill%3D%22%231c1e20%22%2F%3E%3Cpath%20fill%3D%22%23FFD04C%22%20d%3D%22M12.46%2C87.32c-4.2%2C0-8.37.18-12.46.53v25.07c4.09-.46%2C8.26-.68%2C12.46-.68%2C63.16%2C0%2C114.54%2C51.38%2C114.54%2C114.51s-51.38%2C114.54-114.54%2C114.54c-4.2%2C0-8.37-.21-12.46-.68v25.07c4.09.36%2C8.26.53%2C12.46.53%2C76.91%2C0%2C139.47-62.56%2C139.47-139.47S89.37%2C87.32%2C12.46%2C87.32Z%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%222.12%22%20width%3D%2224.92%22%20height%3D%2271.6%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22170.95%22%20y%3D%22214.3%22%20width%3D%2271.57%22%20height%3D%2224.92%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%223.3%22%20y%3D%22383.13%22%20width%3D%2224.92%22%20height%3D%2271.58%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22138.59%22%20y%3D%22326.61%22%20width%3D%2224.92%22%20height%3D%2271.57%22%20transform%3D%22translate%28-212.01%20212.96%29%20rotate%28-45%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22114.42%22%20y%3D%2279.03%22%20width%3D%2271.58%22%20height%3D%2224.92%22%20transform%3D%22translate%28-20.69%20133.02%29%20rotate%28-45.01%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22158.05%22%20y%3D%22145.79%22%20width%3D%2271.58%22%20height%3D%2224.93%22%20transform%3D%22translate%28-43.79%2079.83%29%20rotate%28-20.97%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%2254.47%22%20y%3D%2238.67%22%20width%3D%2271.57%22%20height%3D%2224.92%22%20transform%3D%22translate%287.65%20113.87%29%20rotate%28-66.75%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%22178.37%22%20y%3D%22267.98%22%20width%3D%2224.92%22%20height%3D%2271.57%22%20transform%3D%22translate%28-164.01%20356.5%29%20rotate%28-66.31%29%22%2F%3E%3Crect%20fill%3D%22%23FFD04C%22%20x%3D%2273.81%22%20y%3D%22369.45%22%20width%3D%2224.92%22%20height%3D%2271.57%22%20transform%3D%22translate%28-143.17%2060.25%29%20rotate%28-21.61%29%22%2F%3E%3C%2Fsvg%3E"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+  /* ── Login screen — idêntico ao Hub ── */
+  #login-screen {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.75);
-    z-index: 9999;
+    background: #2c2e30;
+    display: flex;
     align-items: center;
     justify-content: center;
+    z-index: 9999;
   }
-  .diag-overlay.open { display: flex; }
-  .diag-box {
-    background: var(--surface);
-    border: 1px solid var(--border2);
-    border-radius: 10px;
-    width: 90vw;
-    max-width: 860px;
-    max-height: 80vh;
+  .login-box {
+    background: #383a3c;
+    border-radius: 16px;
+    padding: 48px 52px;
+    width: 100%;
+    max-width: 400px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-  }
-  .diag-header {
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .login-logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .login-logo-wrap span {
     font-family: 'Barlow Condensed', sans-serif;
-    font-size: 1rem;
+    font-size: 26px;
     font-weight: 700;
-    color: var(--amarelo);
-    text-transform: uppercase;
+    color: #FFD04C;
     letter-spacing: 1px;
   }
-  .diag-close {
+  .login-subtitle {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: #888;
+    text-transform: uppercase;
+    text-align: center;
+    margin-top: -8px;
+  }
+  .login-input-wrap { width: 100%; position: relative; }
+  .login-input-wrap input {
+    width: 100%;
+    background: #2c2e30;
+    border: 1.5px solid #4a4c4e;
+    color: #FFFDF0;
+    padding: 13px 44px 13px 16px;
+    border-radius: 8px;
+    font-family: 'Barlow', sans-serif;
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s;
+    letter-spacing: 1px;
+  }
+  .login-input-wrap input::placeholder { color: #666; letter-spacing: 0; }
+  .login-input-wrap input:focus { border-color: #FFD04C; }
+  .login-input-wrap input.error { border-color: #e05252; animation: shake 0.3s; }
+  .login-toggle {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
     background: none;
     border: none;
-    color: var(--text-sub);
-    font-size: 1.4rem;
+    color: #666;
     cursor: pointer;
+    font-size: 16px;
+    padding: 0;
     line-height: 1;
-    padding: 0 4px;
   }
-  .diag-close:hover { color: var(--text); }
-  .diag-body {
-    overflow-y: auto;
-    padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-  .diag-section-title {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: var(--text-sub);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border);
-  }
-  .diag-table {
+  .login-toggle:hover { color: #FFFDF0; }
+  .login-btn {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 0.75rem;
-  }
-  .diag-table th {
-    text-align: left;
-    padding: 6px 10px;
-    color: var(--text-sub);
-    font-weight: 600;
-    font-size: 0.65rem;
+    background: #FFD04C;
+    border: none;
+    color: #1c1e20;
+    padding: 13px;
+    border-radius: 8px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 2px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid var(--border);
-  }
-  .diag-table td {
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text);
-    font-family: 'Barlow', sans-serif;
-  }
-  .diag-table tr:last-child td { border-bottom: none; }
-  .diag-table tr:hover td { background: var(--surface2); }
-  .diag-val-amarelo { color: var(--amarelo); font-weight: 700; }
-  .diag-val-verde   { color: var(--verde);   font-weight: 700; }
-  .diag-val-azul    { color: var(--azul);    font-weight: 700; }
-  .diag-refresh {
-    background: var(--surface2);
-    border: 1px solid var(--border2);
-    color: var(--text-sub);
-    border-radius: 4px;
-    padding: 4px 10px;
-    font-size: 0.7rem;
     cursor: pointer;
-    font-family: 'Barlow', sans-serif;
+    transition: background 0.2s, transform 0.1s;
   }
-  .diag-refresh:hover { color: var(--text); border-color: var(--amarelo); }
-  .diag-loading { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
-  .diag-tabs { display: flex; gap: 4px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
-  .diag-tab {
-    padding: 5px 14px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    font-family: 'Barlow', sans-serif;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-sub);
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .diag-tab.active { color: var(--amarelo); border-color: var(--amarelo); background: var(--amarelo-bg2); }
-  .evento-disponivel { color: var(--verde); font-weight: 600; }
-  .evento-ocupado    { color: var(--vermelho); font-weight: 600; }
-
-  /* ── TV (>1400px) ── */
-  @media (min-width: 1400px) {
-    header { height: 58px; }
-    header img { height: 32px; }
-    header h1 { font-size: 1.05rem; }
-    .kpi .val { font-size: 2rem; }
-    .kpi .lbl { font-size: 0.78rem; }
-    .col-header { font-size: 0.75rem; padding: 10px 12px; }
-    .ticket-title { font-size: 0.8rem; }
-    .ticket-agent, .ticket-product { font-size: 0.66rem; }
-    .ticket-time { font-size: 0.82rem; }
-    .col-stat .sv { font-size: 1rem; }
-    .col-stat .sl { font-size: 0.56rem; }
-    .grid { gap: 8px; padding: 12px 24px; }
+  .login-btn:hover { background: #e6b800; }
+  .login-btn:active { transform: scale(0.98); }
+  .login-error {
+    font-size: 12px;
+    color: #e05252;
+    text-align: center;
+    min-height: 16px;
   }
 
-  /* ── CELULAR (<768px) ── */
-  @media (max-width: 767px) {
-    header { padding: 0 14px; height: 48px; }
-    header img { height: 24px; }
-    header h1 { font-size: 0.82rem; }
+  /* ── Aba Técnicos — botões de período ── */
+  .tec-periodo-btn { background:var(--bg3); border:1px solid var(--border); color:var(--gray2); padding:3px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-family:var(--font); transition:all 0.2s; white-space:nowrap; }
+  .tec-periodo-btn:hover { border-color:var(--yellow); color:var(--white); }
+  .tec-periodo-btn.active { background:var(--yellow); color:var(--bg); border-color:var(--yellow); font-weight:600; }
 
-    .kpis { gap: 5px; padding: 8px 12px; }
-    .kpi { min-width: 60px; padding: 8px 10px; }
-    .kpi .val { font-size: 1.3rem; }
-    .kpi .lbl { font-size: 0.62rem; }
-
-    .bancada { flex-direction: column; padding: 8px 12px; }
-
-    .tabs { display: flex; }
-
-    .grid {
-      display: flex;
-      flex-direction: column;
-      padding: 10px 12px;
-      gap: 0;
-      overflow: visible;
-    }
-    .col { display: none; border-radius: 6px; }
-    .col.active-tab { display: flex; }
-    .col-body { max-height: 60vh; }
-
-    .ticket-title { font-size: 0.82rem; }
-    .ticket-agent, .ticket-product { font-size: 0.68rem; }
-    .ticket-time { font-size: 0.78rem; }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25%      { transform: translateX(-6px); }
+    75%      { transform: translateX(6px); }
   }
-</style>
+  </style>
 </head>
 <body>
 
+<!-- ═══════════════════════════════════════════════
+     TELA DE LOGIN
+════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 242.52 454.71" style="height:40px;width:auto;"><defs><style>.s{fill:#ffd04c;}</style></defs><path class="s" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="s" x="2.12" width="24.92" height="71.6"/><rect class="s" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="s" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="s" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="s" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="s" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="s" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="s" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="s" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></svg>
+      <span>NeoSolar</span>
+    </div>
+    <div class="login-subtitle">Acesso Restrito · Engenharia</div>
+    <div class="login-input-wrap">
+      <input type="password" id="login-input" placeholder="Digite a senha"
+        onkeydown="if(event.key==='Enter')doLogin()"/>
+      <button class="login-toggle" onclick="toggleLoginVis()" tabindex="-1">👁</button>
+    </div>
+    <button class="login-btn" onclick="doLogin()">Entrar</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const SENHA = 'Neo@123456';
+  const SESSION_KEY = 'ast_auth';
+  function doLogin() {
+    const input = document.getElementById('login-input');
+    const err   = document.getElementById('login-error');
+    if (input.value === SENHA) {
+      sessionStorage.setItem(SESSION_KEY, '1');
+      document.getElementById('login-screen').style.display = 'none';
+      err.textContent = '';
+    } else {
+      input.classList.remove('error');
+      void input.offsetWidth;
+      input.classList.add('error');
+      err.textContent = 'Senha incorreta. Tente novamente.';
+      input.value = '';
+      input.focus();
+    }
+  }
+  function toggleLoginVis() {
+    const input = document.getElementById('login-input');
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }
+  window.doLogin = doLogin;
+  window.toggleLoginVis = toggleLoginVis;
+  if (sessionStorage.getItem(SESSION_KEY) === '1') {
+    document.getElementById('login-screen').style.display = 'none';
+  }
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════ -->
 <header>
   <div class="header-left">
-    <img src="data:image/png;base64,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" alt="NeoSolar">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1845.66 454.71" style="height:26px;width:auto;"><defs><style>.l{fill:#ffd04c;}</style></defs><g><path class="l" d="M12.46,87.32c-4.2,0-8.37.18-12.46.53v25.07c4.09-.46,8.26-.68,12.46-.68,63.16,0,114.54,51.38,114.54,114.51s-51.38,114.54-114.54,114.54c-4.2,0-8.37-.21-12.46-.68v25.07c4.09.36,8.26.53,12.46.53,76.91,0,139.47-62.56,139.47-139.47S89.37,87.32,12.46,87.32Z"/><rect class="l" x="2.12" width="24.92" height="71.6"/><rect class="l" x="170.95" y="214.3" width="71.57" height="24.92"/><rect class="l" x="3.3" y="383.13" width="24.92" height="71.58"/><rect class="l" x="138.59" y="326.61" width="24.92" height="71.57" transform="translate(-212.01 212.96) rotate(-45)"/><rect class="l" x="114.42" y="79.03" width="71.58" height="24.92" transform="translate(-20.69 133.02) rotate(-45.01)"/><rect class="l" x="158.05" y="145.79" width="71.58" height="24.93" transform="translate(-43.79 79.83) rotate(-20.97)"/><rect class="l" x="54.47" y="38.67" width="71.57" height="24.92" transform="translate(7.65 113.87) rotate(-66.75)"/><rect class="l" x="178.37" y="267.98" width="24.92" height="71.57" transform="translate(-164.01 356.5) rotate(-66.31)"/><rect class="l" x="73.81" y="369.45" width="24.92" height="71.57" transform="translate(-143.17 60.25) rotate(-21.61)"/></g><g><path class="l" d="M609.13,342.15h-43.27l-107.69-123.22v123.22h-55.83V117.52h42.62l108.35,126.52v-126.52h55.83v224.63Z"/><path class="l" d="M805.69,276.74l.33.99h-114.3c4.29,14.53,15.53,25.77,36.01,25.77,11.23,0,19.82-4.29,24.44-11.57h52.86c-7.6,33.04-38.32,53.85-77.96,53.85-52.53,0-87.54-35.02-87.54-83.91s34.03-83.58,85.23-83.58c46.58,0,81.93,32.04,81.93,80.27,0,5.94,0,12.22-.99,18.17ZM691.06,246.35h65.41c-2.97-17.51-14.53-26.76-31.71-26.76-18.17,0-29.73,10.57-33.69,26.76Z"/><path class="l" d="M1002.58,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM952.04,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.54,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="l" d="M1216,187.22h-56.16c-2.97-16.85-13.54-28.41-36.34-28.41-19.16,0-32.04,7.93-32.04,22.46,0,12.22,8.92,17.51,25.76,21.14l31.38,7.27c40.96,8.92,67.72,25.44,67.72,64.09,0,44.93-37,73.01-93.15,73.01-50.55,0-96.13-23.79-101.42-79.28h55.83c3.63,19.82,20.81,31.71,47.24,31.71,20.81,0,31.71-7.6,31.71-19.82,0-7.6-4.63-15.53-23.79-19.16l-37-8.26c-44.27-9.58-65.08-30.39-65.08-66.07,0-44.93,36.34-73.34,89.19-73.34,36.34,0,90.51,14.21,96.13,74.66Z"/><path class="l" d="M1413.22,261.88c0,48.89-36.34,85.23-86.88,85.23s-86.88-36.34-86.88-85.23,36.34-83.58,86.88-83.58,86.88,35.35,86.88,83.58ZM1362.68,262.21c0-20.81-14.53-37.66-36.01-37.66s-36.34,16.85-36.34,37.66,14.53,38.65,36.34,38.65,36.01-17.18,36.01-38.65Z"/><path class="l" d="M1495.15,342.15h-53.51V107.61h53.51v234.54Z"/><path class="l" d="M1700.64,342.15h-53.51v-8.92c-11.89,7.6-26.43,12.22-43.94,12.22-43.27,0-79.61-36.01-79.61-83.58s36.34-83.58,79.61-83.58c17.51,0,32.04,4.63,43.94,12.22v-8.59h53.51v160.22ZM1647.12,286.65v-49.55c-9.91-11.56-21.47-15.19-33.37-15.19-21.8,0-37.66,17.84-37.66,39.97s15.86,39.64,37.66,39.64c11.89,0,23.46-3.3,33.37-14.86Z"/><path class="l" d="M1845.66,230.16c-26.1.99-42.62,7.93-55.17,20.48v91.5h-53.51v-160.22h53.51v17.18c14.21-12.22,31.38-19.82,55.17-19.82v50.87Z"/></g></svg>
     <span class="header-sep">/</span>
-    <h1>Assistência Técnica</h1>
+    <h1>REPORT ASSISTÊNCIA TÉCNICA</h1>
   </div>
   <div class="header-right">
-    <div id="last-update">Carregando...</div>
+    <button class="refresh-btn" onclick="loadData()">↻ Atualizar</button>
+    <div id="last-update">—</div>
     <div id="clock">--:--:--</div>
   </div>
 </header>
 
-<div class="kpis">
-  <div class="kpi total"> <div class="val" id="k-total">—</div><div class="lbl">Total abertos</div></div>
-  <div class="kpi blue">  <div class="val" id="k-contato">—</div><div class="lbl">Ag. 1º Contato</div></div>
-  <div class="kpi purple"><div class="val" id="k-teste">—</div><div class="lbl">Ag. Teste</div></div>
-  <div class="kpi blue">  <div class="val" id="k-emteste">—</div><div class="lbl">Em Teste</div></div>
-  <div class="kpi yellow"><div class="val" id="k-estresse">—</div><div class="lbl">Teste Estresse</div></div>
-  <div class="kpi red">   <div class="val" id="k-manut">—</div><div class="lbl">Em Manutenção</div></div>
-  <div class="kpi yellow"><div class="val" id="k-peca">—</div><div class="lbl">Ag. Peça</div></div>
-  <div class="kpi yellow"><div class="val" id="k-aprov">—</div><div class="lbl">Ag. Aprovação</div></div>
-  <div class="kpi red">   <div class="val" id="k-dev">—</div><div class="lbl">Devolução</div></div>
-  <div class="kpi purple"><div class="val" id="k-sg">—</div><div class="lbl">Ag. Manut. SG</div></div>
-  <div class="kpi gray">  <div class="val" id="k-outros">—</div><div class="lbl">Outros</div></div>
-  <div class="kpi green"> <div class="val" id="k-fechados">—</div><div class="lbl">Fechados Hoje</div></div>
+<!-- ═══════════════════════════════════════════════
+     BARRA DE PERÍODO + FILTRO DE GARANTIA (sticky)
+════════════════════════════════════════════════ -->
+<div class="period-bar">
+  <label>De</label><input type="date" id="date-from"/>
+  <label>Até</label><input type="date" id="date-to"/>
+  <div class="period-shortcuts">
+    <button onclick="setPeriod(7)"   id="sh-7">7d</button>
+    <button onclick="setPeriod(30)"  id="sh-30" class="active">30d</button>
+    <button onclick="setPeriod(90)"  id="sh-90">90d</button>
+    <button onclick="setPeriod(365)" id="sh-365">12m</button>
+    <button onclick="setPeriodAll()" id="sh-all">Tudo</button>
+  </div>
+  <button class="apply-btn" onclick="loadData()">Aplicar</button>
+
+  <div class="period-bar-sep"></div>
+
+  <span class="garantia-inline-label">Garantia</span>
+  <div class="garantia-inline-btns" id="garantia-filter-bar">
+    <button class="active" onclick="setProdGarantia('todos',this)">Todos</button>
+    <button onclick="setProdGarantia('garantia',this)">✓ Em Garantia</button>
+    <button onclick="setProdGarantia('fora',this)">✗ Fora de Garantia</button>
+    <button onclick="setProdGarantia('manutencao',this)">🔧 Manutenção Paga</button>
+  </div>
+  <div id="prod-filter-count" style="font-size:11px;color:var(--gray2);white-space:nowrap;"></div>
+
+  <div class="data-status" id="data-status"></div>
 </div>
 
-<div class="bancada" id="bancada">
-  <div class="bancada-card" id="bancada-Wendel">
-    <div class="bancada-nome">Wendel</div>
-    <div class="bancada-status disponivel">Disponível</div>
+<!-- ═══════════════════════════════════════════════
+     TABS (sticky)
+════════════════════════════════════════════════ -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('visao-geral')">Visão Geral</button>
+  <button class="tab"        onclick="switchTab('produtos')">📦 Produtos</button>
+  <button class="tab"        onclick="switchTab('operacao')">⚙️ Operação</button>
+  <button class="tab"        onclick="switchTab('importacoes')">🔩 Importações</button>
+  <button class="tab"        onclick="switchTab('sla')">📊 SLA & Lead Time</button>
+  <button class="tab"        onclick="switchTab('tecnicos')">👨‍🔧 Técnicos</button>
+  <button class="tab"        onclick="switchTab('dados')">📁 Dados</button>
+</div>
+
+<main>
+
+<!-- ═══ ABA: VISÃO GERAL ═══ -->
+<div id="tab-visao-geral" class="tab-content active">
+  <div class="kpis" id="kpi-geral"></div>
+  <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">Atendimentos por Fornecedor</div>
+      <div class="chart-wrap"><canvas id="chart-line"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Status dos Tickets (Desk)</div>
+      <div class="chart-wrap"><canvas id="chart-desk-status"></canvas></div>
+    </div>
   </div>
-  <div class="bancada-card" id="bancada-Nathan">
-    <div class="bancada-nome">Nathan</div>
-    <div class="bancada-status disponivel">Disponível</div>
-  </div>
-  <div class="bancada-card" id="bancada-Marcos">
-    <div class="bancada-nome">Marcos</div>
-    <div class="bancada-status disponivel">Disponível</div>
+  <div class="grid3">
+    <div class="panel">
+      <div class="panel-title">Distribuição de Garantia</div>
+      <div class="chart-wrap"><canvas id="chart-warranty"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Serviços Realizados</div>
+      <div class="chart-wrap"><canvas id="chart-service"></canvas></div>
+    </div>
+    <div class="panel red">
+      <div class="panel-title">SLA Desk — Visão Geral</div>
+      <div id="sla-summary"></div>
+    </div>
   </div>
 </div>
 
-<div class="tabs" id="tabs"></div>
+<!-- ═══ ABA: PRODUTOS ═══ -->
+<div id="tab-produtos" class="tab-content">
+  <div class="section-header">Análise de Produtos</div>
 
-<!-- Modal de Diagnóstico -->
-<div class="diag-overlay" id="diagOverlay" onclick="if(event.target===this)fecharDiag()">
-  <div class="diag-box">
-    <div class="diag-header">
-      ⚙ Diagnóstico — Bancada
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="diag-refresh" onclick="carregarDiag()">↻ Atualizar</button>
-        <button class="diag-close" onclick="fecharDiag()">×</button>
+  <div class="grid2">
+    <div class="panel blue">
+      <div class="panel-title">Entradas por Linha de Produto</div>
+      <div style="position:relative;height:280px;width:100%;"><canvas id="chart-line2"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Local de Teste <span>por período</span></div>
+      <div style="position:relative;height:320px;width:100%;"><canvas id="chart-test-location"></canvas></div>
+    </div>
+  </div>
+
+  <div class="produtos-unified-grid">
+    <div class="produtos-left-panel">
+      <div class="produtos-panel-title">
+        Top 10 Produtos com Mais Entradas
+        <span class="hint-click">clique para ver defeitos →</span>
+      </div>
+      <div id="top-products-list" class="hbar-list"></div>
+    </div>
+    <div class="produtos-right-panel" id="defeitos-panel">
+      <div class="produtos-panel-title">
+        <span id="defeitos-title-txt">Top Defeitos Recorrentes</span>
+        <span id="defeitos-badge" class="selected-badge" style="display:none;" onclick="clearProdSel()"></span>
+      </div>
+      <div id="top-faults-list" class="hbar-list"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:16px;margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">Chamados Com/Sem Garantia <span>período selecionado</span></div>
+      <div style="position:relative;height:300px;width:100%;"><canvas id="chart-garantia-donut"></canvas></div>
+      <div id="donut-garantia-legenda" style="text-align:center;margin-top:10px;"></div>
+    </div>
+    <div class="panel yellow">
+      <div class="panel-title">Total de Serviços por Período <span>total produtos</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-abs"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Total de Chamados por Período <span>por tipo de garantia</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-garantia-periodo"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Total de Serviços por Período <span>percentual</span></div>
+      <div class="chart-wrap tall"><canvas id="chart-servico-pct"></canvas></div>
+    </div>
+  </div>
+
+
+  <!-- Comparativo RMA × Vendas Sankhya -->
+  <div class="section-header" style="margin-top:8px;">Comparativo RMA × Vendas <span style="font-size:11px;font-weight:400;color:var(--gray2);margin-left:8px;">cruzamento por SKU com dados Sankhya</span></div>
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel red">
+      <div class="panel-title">RMA vs Vendas <span>Top 15 produtos com mais retornos</span></div>
+      <div style="position:relative;height:420px;"><canvas id="chart-rma-vendas"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Taxa de Retorno <span>% RMA / Vendas — verde &lt;5% · laranja 5-10% · vermelho &gt;10%</span></div>
+      <div style="position:relative;height:420px;"><canvas id="chart-taxa-retorno"></canvas></div>
+    </div>
+  </div>
+
+</div><!-- /tab-produtos -->
+
+<!-- ═══ ABA: OPERAÇÃO ═══ -->
+<div id="tab-operacao" class="tab-content">
+  <div class="section-header">Custo de Atendimento Técnico</div>
+  <div class="kpis" id="kpi-custo" style="margin-bottom:16px;"></div>
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel yellow">
+      <div class="panel-title">Custo por Fornecedor <span>R$ estimado no período</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-custo-linha"></canvas></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">Custo por Período <span>evolução mensal/trimestral</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-custo-periodo"></canvas></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Top 15 Modelos por Custo de Atendimento <span>R$ estimado — Em teste + Em manutenção + Aguardando laudo + Aguardando RMA</span></div>
+    <div style="position:relative;height:400px;"><canvas id="chart-custo-produto"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Detalhamento por Ticket
+      <span style="margin-left:auto;font-size:11px;color:var(--gray2);">R$2/min · horas úteis 09h–18h seg–sex</span>
+    </div>
+    <div style="overflow-x:auto;max-height:450px;overflow-y:auto;">
+      <table class="tbl" id="tbl-custo-tickets" style="width:100%;">
+        <thead><tr>
+          <th>Ticket #</th><th>Produto</th><th>Fornecedor</th><th>Garantia</th>
+          <th class="num">H. Úteis</th><th class="num">Custo (R$)</th><th>Status de custo</th><th>Data</th>
+        </tr></thead>
+        <tbody id="tbody-custo-tickets"></tbody>
+      </table>
+    </div>
+  </div>
+</div><!-- /tab-operacao -->
+
+<!-- ═══ ABA: IMPORTAÇÕES ═══ -->
+<div id="tab-importacoes" class="tab-content">
+  <div class="section-header">Planejamento de Importações</div>
+  <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">Top Componentes Consumidos</div>
+      <div style="overflow-x:auto;max-height:320px;overflow-y:auto;">
+        <table class="tbl" id="tbl-components">
+          <thead><tr>
+            <th>SKU</th><th>Modelo</th><th class="num">Total</th>
+            <th class="num">Em Garantia</th><th class="num">Fora Garantia</th>
+          </tr></thead>
+          <tbody id="tbody-components"></tbody>
+        </table>
       </div>
     </div>
-    <div class="diag-tabs">
-      <button class="diag-tab active" onclick="switchDiagTab('resumo', this)">Resumo</button>
-      <button class="diag-tab" onclick="switchDiagTab('eventos', this)">Log de Eventos</button>
-    </div>
-    <div class="diag-body" id="diagBody">
-      <div class="diag-loading">Carregando...</div>
+    <div class="panel blue">
+      <div class="panel-title">Consumo Mensal de Peças</div>
+      <div class="chart-wrap tall"><canvas id="chart-monthly"></canvas></div>
     </div>
   </div>
-</div>
-
-<div class="grid" id="grid">
-  <div class="col contato" id="col-wrap-contato">
-    <div class="col-header">Ag. 1º Contato - AST <span class="count" id="cnt-contato">0</span></div>
-    <div class="col-stats" id="stats-contato"></div>
-    <div class="col-body" id="col-contato"><div class="loading">Carregando...</div></div>
+  <div class="panel red">
+    <div class="panel-title">Estoque de Spare Parts <span>— alerta de estoque mínimo</span></div>
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
+      <input type="text" id="search-parts" placeholder="🔍 Buscar peça..."
+        style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-size:13px;width:260px;"
+        oninput="renderSpareParts()"/>
+      <button onclick="saveStockMins()" style="background:var(--yellow);color:var(--bg);border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:var(--fontc);font-size:13px;font-weight:700;">💾 Salvar Mínimos</button>
+    </div>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+      <table class="tbl" id="tbl-spare">
+        <thead><tr>
+          <th>Fornecedor</th><th>Categoria</th><th>SKU</th><th>Modelo</th>
+          <th class="num">Qtd Inicial</th><th class="num">Saída</th><th class="num">Total Físico</th>
+          <th class="num">Estoque Mín.</th><th>Status</th>
+        </tr></thead>
+        <tbody id="tbody-spare"></tbody>
+      </table>
+    </div>
   </div>
-  <div class="col teste" id="col-wrap-teste">
-    <div class="col-header">Ag. Teste <span class="count" id="cnt-teste">0</span></div>
-    <div class="col-stats" id="stats-teste"></div>
-    <div class="col-body" id="col-teste"><div class="loading">Carregando...</div></div>
+  <div class="panel">
+    <div class="panel-title">Base de Importações (Sankhya)</div>
+    <div style="overflow-x:auto;max-height:350px;overflow-y:auto;">
+      <table class="tbl" id="tbl-sankhya">
+        <thead><tr id="thead-sankhya"></tr></thead>
+        <tbody id="tbody-sankhya"></tbody>
+      </table>
+    </div>
   </div>
-  <div class="col emteste" id="col-wrap-emteste">
-    <div class="col-header">Em Teste <span class="count" id="cnt-emteste">0</span></div>
-    <div class="col-stats" id="stats-emteste"></div>
-    <div class="col-body" id="col-emteste"><div class="loading">Carregando...</div></div>
+</div><!-- /tab-importacoes -->
+
+<!-- ═══ ABA: SLA & LEAD TIME ═══ -->
+<div id="tab-sla" class="tab-content fullwidth">
+  <div class="section-header">SLA & Lead Time por Status</div>
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label style="font-size:12px;color:var(--gray2);">Tipo:</label>
+      <select id="filtro-garantia" onchange="renderSlaReport()"
+        style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:6px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+        <option value="todos">Todos</option>
+        <option value="garantia">Em Garantia</option>
+        <option value="fora">Fora de Garantia</option>
+        <option value="manutencao">Manutenção Paga</option>
+      </select>
+    </div>
+    <div class="kpi yellow" id="kpi-sla-geral" style="min-width:140px;flex:none;"><div class="val">—</div><div class="lbl">% Conclusão SLA Geral</div></div>
+    <div class="kpi blue"   id="kpi-sla-tickets" style="min-width:120px;flex:none;"><div class="val">0</div><div class="lbl">Tickets com Histórico</div></div>
+    <div class="kpi"        id="kpi-sla-loading" style="min-width:140px;flex:none;"><div class="val" style="font-size:16px;">0/0</div><div class="lbl">Histórico Carregado</div></div>
+    <p style="font-size:11px;color:var(--gray2);margin-left:auto;">As médias de lead time estão em dias úteis (1 dia = 8h). Cruzamento com RMA para filtro de garantia.</p>
   </div>
-  <div class="col sg" id="col-wrap-sg">
-    <div class="col-header">Ag. Manut. SG <span class="count" id="cnt-sg">0</span></div>
-    <div class="col-stats" id="stats-sg"></div>
-    <div class="col-body" id="col-sg"><div class="loading">Carregando...</div></div>
+
+  <div class="panel yellow" style="margin-bottom:16px;">
+    <div class="panel-title">Lead Time Médio por Status <span>tickets fechados no período</span>
+      <span style="margin-left:auto;color:var(--yellow);font-size:11px;cursor:pointer;font-weight:600;" onclick="abrirValidacao()">↗ VER DETALHES POR TICKET</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="tbl" id="tbl-sla-hist" style="width:100%;">
+        <thead><tr>
+          <th style="width:35%;">Subclassificações</th>
+          <th class="num" style="width:13%;">Média Resolução (dias úteis)</th>
+          <th class="num" style="width:13%;">% Conclusão SLA</th>
+          <th class="num" style="width:13%;">SLA Dias Úteis</th>
+          <th class="num" style="width:13%;">Qtde Casos</th>
+          <th class="num" style="width:13%;">% Frequência</th>
+        </tr></thead>
+        <tbody id="tbody-sla-hist">
+          <tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:20px;">⏳ Aguardando carregamento do histórico de tickets...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
-  <div class="col estresse" id="col-wrap-estresse">
-    <div class="col-header">Em Teste Estresse/Ciclo <span class="count" id="cnt-estresse">0</span></div>
-    <div class="col-stats" id="stats-estresse"></div>
-    <div class="col-body" id="col-estresse"><div class="loading">Carregando...</div></div>
+
+  <div class="panel" id="painel-validacao" style="display:none;margin-bottom:16px;">
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+      Detalhes por Ticket — Validação
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="validacao-status" onchange="renderValidacaoTabela()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:3px 8px;border-radius:4px;font-family:var(--font);font-size:12px;">
+          <option value="">Todos os status</option>
+        </select>
+        <button onclick="document.getElementById('painel-validacao').style.display='none'"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--gray2);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px;">Fechar</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+      <table class="tbl" id="tbl-validacao" style="width:100%;font-size:11px;">
+        <thead><tr>
+          <th>Ticket #</th><th>Status</th><th>Macro</th>
+          <th class="num">Horas Brutas</th><th class="num">Dias Úteis</th>
+          <th class="num">SLA (du)</th><th class="num">Resultado</th><th>Criado em</th>
+        </tr></thead>
+        <tbody id="tbody-validacao"></tbody>
+      </table>
+    </div>
   </div>
-  <div class="col manut" id="col-wrap-manut">
-    <div class="col-header">Em Manutenção <span class="count" id="cnt-manut">0</span></div>
-    <div class="col-stats" id="stats-manut"></div>
-    <div class="col-body" id="col-manut"><div class="loading">Carregando...</div></div>
+
+  <div class="panel-title" style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--gray2);">
+    Histograma de Lead Time por Macro Status
+    <span style="color:var(--yellow);font-size:11px;font-weight:400;margin-left:8px;">dias úteis — período selecionado</span>
   </div>
-  <div class="col peca" id="col-wrap-peca">
-    <div class="col-header">Ag. Peça Repos. <span class="count" id="cnt-peca">0</span></div>
-    <div class="col-stats" id="stats-peca"></div>
-    <div class="col-body" id="col-peca"><div class="loading">Carregando...</div></div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;" id="histograma-grid">
+    <div class="panel" style="border-left-color:var(--green);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">ENTRADA</div><div style="position:relative;height:220px;"><canvas id="chart-hist-entrada"></canvas></div></div>
+    <div class="panel" style="border-left-color:var(--blue);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">AVALIAÇÃO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-avaliacao"></canvas></div></div>
+    <div class="panel" style="border-left-color:#e0c052;padding:12px;"><div class="panel-title" style="margin-bottom:8px;">PAGAMENTO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-pagamento"></canvas></div></div>
+    <div class="panel" style="border-left-color:var(--orange);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">TÉCNICO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-tecnico"></canvas></div></div>
+    <div class="panel" style="border-left-color:var(--purple);padding:12px;"><div class="panel-title" style="margin-bottom:8px;">DEVOLUÇÃO</div><div style="position:relative;height:220px;"><canvas id="chart-hist-devolucao"></canvas></div></div>
   </div>
-  <div class="col aprov" id="col-wrap-aprov">
-    <div class="col-header">Ag. Aprov. Manut. <span class="count" id="cnt-aprov">0</span></div>
-    <div class="col-stats" id="stats-aprov"></div>
-    <div class="col-body" id="col-aprov"><div class="loading">Carregando...</div></div>
+
+  <div class="panel blue">
+    <div class="panel-title">% Conclusão SLA por Mês <span>meta: 80%</span></div>
+    <div style="position:relative;height:380px;width:100%;"><canvas id="chart-sla-mensal"></canvas></div>
   </div>
-  <div class="col dev" id="col-wrap-dev">
-    <div class="col-header">Em Trat. Devolução <span class="count" id="cnt-dev">0</span></div>
-    <div class="col-stats" id="stats-dev"></div>
-    <div class="col-body" id="col-dev"><div class="loading">Carregando...</div></div>
+</div><!-- /tab-sla -->
+
+<!-- ═══ ABA: DADOS ═══ -->
+<div id="tab-dados" class="tab-content">
+  <div class="section-header">Gerenciamento de Dados</div>
+  <div class="grid2">
+    <div class="panel yellow">
+      <div class="panel-title">📋 RMA — Zoho Forms</div>
+      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">
+        Exporte o CSV em: <a href="https://forms.zoho.com/neosolar/report/RMAEPEVER1_Report/records/web" target="_blank" style="color:var(--yellow);">Zoho Forms → Report RMA</a>
+      </p>
+      <div class="upload-zone" id="zone-rma" onclick="document.getElementById('file-rma').click()">
+        <input type="file" id="file-rma" accept=".csv" onchange="handleFile('rma', this)"/>
+        <div class="icon">📄</div><p>Clique ou arraste o CSV do RMA</p>
+        <div class="filename" id="fname-rma"></div>
+      </div>
+      <button class="upload-btn" onclick="uploadFile('rma')">Enviar RMA</button>
+      <div id="status-rma" class="upload-status" style="display:none;"></div>
+    </div>
+    <div class="panel blue">
+      <div class="panel-title">🔩 Spare Parts — Google Sheets</div>
+      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">Exporte sua planilha de spare parts como CSV e faça upload aqui.</p>
+      <div class="upload-zone" id="zone-spare" onclick="document.getElementById('file-spare').click()">
+        <input type="file" id="file-spare" accept=".csv" onchange="handleFile('spare', this)"/>
+        <div class="icon">📊</div><p>Clique ou arraste o CSV de Spare Parts</p>
+        <div class="filename" id="fname-spare"></div>
+      </div>
+      <button class="upload-btn" onclick="uploadFile('spare')">Enviar Spare Parts</button>
+      <div id="status-spare" class="upload-status" style="display:none;"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">📦 Importações — Sankhya</div>
+      <p style="font-size:12px;color:var(--gray2);margin-bottom:12px;">Exporte o relatório de importações do Sankhya como CSV e faça upload aqui.</p>
+      <div class="upload-zone" id="zone-sankhya" onclick="document.getElementById('file-sankhya').click()">
+        <input type="file" id="file-sankhya" accept=".csv" onchange="handleFile('sankhya', this)"/>
+        <div class="icon">🚢</div><p>Clique ou arraste o CSV do Sankhya</p>
+        <div class="filename" id="fname-sankhya"></div>
+      </div>
+      <button class="upload-btn" onclick="uploadFile('sankhya')">Enviar Sankhya</button>
+      <div id="status-sankhya" class="upload-status" style="display:none;"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">📡 Status das Fontes</div>
+      <div id="source-status" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+      <p style="font-size:11px;color:var(--gray2);margin-top:16px;">⚠️ Os dados de upload são armazenados temporariamente no servidor. Recomendamos refazer o upload semanalmente ou após deploy.</p>
+    </div>
   </div>
-</div>
-
-<script>
-const API = 'https://dashboard-neosolar.vercel.app';
-const SHOW_AGENT = ['emteste', 'manut', 'peca', 'aprov'];
-
-function norm(s) {
-  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-const SLA_HORAS = {
-  'aguardando aprovacao de manutencao (sg)': 2 * 24,
-  'aguardando chegada de produto na neosolar': 30 * 24,
-  'aguardando laudo': 0.13 * 24,
-  'aguardando manutencao (sg)': 1 * 24,
-  'aguardando peca reposicao': 45 * 24,
-  'aguardando teste': 3 * 24,
-  'descarte': 1 * 24,
-  'em teste': 0.25 * 24,
-  'em manutencao': 1 * 24,
-  'em tratativa p/ devolucao cliente': 2 * 24,
-  'produto despachado ast': 0,
-};
-
-function getSlaHoras(status) { return SLA_HORAS[norm(status)] ?? null; }
-
-const GRUPOS = [
-  { id: 'contato', label: 'Ag. 1º Contato', match: s => norm(s).includes('aguardando 1') && norm(s).includes('contato') },
-  { id: 'teste',   label: 'Ag. Teste',      match: s => norm(s) === 'aguardando teste' },
-  { id: 'emteste', label: 'Em Teste',       match: s => norm(s) === 'em teste' },
-  { id: 'sg',      label: 'Manut. SG',      match: s => norm(s) === 'aguardando manutencao (sg)' },
-  { id: 'estresse', label: 'Teste Estresse', match: s => norm(s) === 'em teste de estresse/ciclo' },
-  { id: 'manut',   label: 'Em Manut.',      match: s => norm(s) === 'em manutencao' },
-  { id: 'peca',    label: 'Ag. Peça',       match: s => norm(s).includes('peca reposicao') },
-  { id: 'aprov',   label: 'Ag. Aprov.',     match: s => norm(s).includes('aprovacao de manutencao') },
-  { id: 'dev',     label: 'Devolução',      match: s => norm(s).includes('devolucao cliente') },
-];
-
-function calcTempo(isoStr) {
-  if (!isoStr) return null;
-  const ms = Date.now() - new Date(isoStr).getTime();
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  if (h >= 24) return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
-  return h + 'h ' + m + 'm';
-}
-
-function classTempo(isoStr, status) {
-  if (!isoStr) return 'time-none';
-  const h = (Date.now() - new Date(isoStr).getTime()) / 3600000;
-  const sla = getSlaHoras(status);
-  if (sla === null || sla === 0) {
-    if (h < 24) return 'time-green';
-    if (h < 72) return 'time-yellow';
-    return 'time-red';
-  }
-  if (h >= sla)       return 'time-red';
-  if (h >= sla * 0.5) return 'time-yellow';
-  return 'time-green';
-}
-
-function getAgentName(t) {
-  if (t.assignee && t.assignee.firstName)
-    return t.assignee.firstName + (t.assignee.lastName ? ' ' + t.assignee.lastName : '');
-  return null;
-}
-
-const STATUS_BANCADA = ['em teste', 'em manutencao', 'aguardando laudo'];
-const STATUS_PRODUCAO = ['em teste', 'em manutencao', 'aguardando laudo', 'em teste de estresse/ciclo'];
-const TECNICOS_BANCADA = ['Wendel', 'Nathan', 'Marcos'];
-
-function isBancada(status) {
-  return STATUS_BANCADA.some(s => norm(status).includes(s));
-}
-
-// ── OCIOSIDADE DOS TÉCNICOS ──
-// Funções de leitura/escrita no Supabase via backend
-
-async function setBancadaLivre(nome) {
-  try {
-    const agora = new Date().toISOString();
-    // Só grava se mudou de estado (estava ocupado antes)
-    if (_bancadaEstadoAnterior[nome] !== 'disponivel') {
-      _bancadaEstadoAnterior[nome] = 'disponivel';
-      await fetch(API + '/bancada-ocioso', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tecnico: nome, livre_desde: agora })
-      });
-    }
-    _bancadaLivreDesde[nome] = new Date(agora);
-    // Atualiza o card após salvar
-    const card = document.getElementById('bancada-' + nome);
-    if (card && !card.classList.contains('ocupado')) {
-      const mins = minutosUteisDesde(_bancadaLivreDesde[nome]);
-      card.innerHTML = '<div class="bancada-nome">' + nome + '</div>' +
-        '<div class="bancada-status disponivel">Disponível</div>' +
-        renderOciosoCard(nome, mins);
-    }
-  } catch(e) { console.error('setBancadaLivre error:', e); }
-}
-
-async function setBancadaOcupado(nome) {
-  try {
-    // Só grava se mudou de estado (estava disponível antes)
-    if (_bancadaEstadoAnterior[nome] !== 'ocupado') {
-      _bancadaEstadoAnterior[nome] = 'ocupado';
-      const livre_desde = _bancadaLivreDesde[nome] ? _bancadaLivreDesde[nome].toISOString() : null;
-      await fetch(API + '/bancada-ocioso', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tecnico: nome, livre_desde, ocupado: true })
-      });
-    }
-  } catch(e) { console.error('setBancadaOcupado error:', e); }
-}
-
-const _bancadaLivreDesde  = {}; // { 'Wendel': Date }
-const _bancadaMinsSemana  = {}; // { 'Wendel': minutos semana } — vem do backend
-const _bancadaTotalHoje    = {}; // { 'Wendel': minutos acumulados no dia }
-const _ticketsAnterior     = {}; // { ticketId: { status, assignee } } — estado anterior
-const _bancadaEstadoAnterior = {}; // { 'Wendel': 'disponivel' | 'ocupado' } — evita eventos duplicados
-const _bancadaProducao     = {}; // { 'Wendel': { hoje, semana, mes } }
-
-async function carregarProducao() {
-  try {
-    const r = await fetch(API + '/bancada-producao');
-    const data = await r.json();
-    const prod = data.producao || {};
-    Object.keys(prod).forEach(nome => {
-      _bancadaProducao[nome] = prod[nome];
-    });
-  } catch(e) { console.error('carregarProducao error:', e); }
-}
-
-function detectarProducao(tickets) {
-  tickets.forEach(t => {
-    const id = t.id;
-    const statusAtual = norm(t.status || '');
-    const agentNome = t.assignee && t.assignee.firstName ? t.assignee.firstName : null;
-    const anterior = _ticketsAnterior[id];
-
-    if (anterior && agentNome) {
-      const eraProducao = STATUS_PRODUCAO.some(s => anterior.status.includes(s));
-      const aindaProducao = STATUS_PRODUCAO.some(s => statusAtual.includes(s));
-      // Saiu de um status de produção para outro status
-      if (eraProducao && !aindaProducao) {
-        const tecnico = agentNome;
-        console.log('[PRODUCAO] ' + tecnico + ' finalizou ticket #' + t.ticketNumber);
-        // Incrementa localmente
-        if (!_bancadaProducao[tecnico]) _bancadaProducao[tecnico] = { hoje: 0, semana: 0, mes: 0 };
-        _bancadaProducao[tecnico].hoje++;
-        _bancadaProducao[tecnico].semana++;
-        _bancadaProducao[tecnico].mes++;
-        // Grava no Supabase
-        fetch(API + '/bancada-producao', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tecnico, quantidade: 1 })
-        }).catch(e => console.error('producao post error:', e));
-      }
-    }
-    // Atualiza estado anterior
-    _ticketsAnterior[id] = { status: statusAtual, assignee: agentNome };
-  });
-}
-
-async function carregarOciosidade() {
-  try {
-    const r = await fetch(API + '/bancada-ocioso');
-    const data = await r.json();
-    console.log('[OCIOSO] dados do Supabase:', JSON.stringify(data));
-    (data.ociosidade || []).forEach(row => {
-      _bancadaLivreDesde[row.tecnico] = row.livre_desde ? new Date(row.livre_desde) : null;
-      _bancadaTotalHoje[row.tecnico]  = row.mins_hoje    || 0;
-      _bancadaMinsSemana[row.tecnico] = row.mins_semana  || 0;
-    });
-  } catch(e) { console.error('carregarOciosidade error:', e); }
-}
-
-// Atualiza _bancadaTotalHoje com dados frescos do backend a cada refresh
-async function atualizarTotalHoje() {
-  try {
-    const r = await fetch(API + '/bancada-ocioso');
-    const data = await r.json();
-    (data.ociosidade || []).forEach(row => {
-      _bancadaTotalHoje[row.tecnico]  = row.mins_hoje   || 0;
-      _bancadaMinsSemana[row.tecnico] = row.mins_semana || 0;
-    });
-    atualizarOciosidade();
-  } catch(e) { /* silencioso */ }
-}
-
-
-// Registra quando cada técnico ficou disponível (em horas úteis)
-
-
-function minutosUteisDesde(desde) {
-  // Calcula minutos úteis do período atual (09h-18h, seg-sex, só hoje)
-  if (!desde) return 0;
-  const agora = new Date();
-  const diaSemana = agora.getDay();
-  if (diaSemana === 0 || diaSemana === 6) return 0;
-
-  const ini = new Date(agora); ini.setHours(9,  0, 0, 0);
-  const fim = new Date(agora); fim.setHours(18, 0, 0, 0);
-  if (agora <= ini) return 0;
-
-  const livreDesde = desde instanceof Date ? desde : new Date(desde);
-  if (isNaN(livreDesde.getTime())) return 0;
-
-  const inicio = livreDesde > ini ? livreDesde : ini;
-  const final  = agora < fim ? agora : fim;
-  if (final <= inicio) return 0;
-  return Math.floor((final - inicio) / 60000);
-}
-
-function formatarTempo(minutos) {
-  if (minutos < 1) return '0m';
-  if (minutos < 60) return minutos + 'm';
-  const h = Math.floor(minutos / 60);
-  const m = minutos % 60;
-  return h + 'h' + (m > 0 ? ' ' + m + 'm' : '');
-}
-
-function formatarOciosidade(minutos) {
-  if (minutos < 1) return 'Disponível agora';
-  return 'Disponível há ' + formatarTempo(minutos);
-}
-
-function renderOciosoCard(nome, mins) {
-  const hoje   = _bancadaTotalHoje[nome]  || 0;
-  const semana = _bancadaMinsSemana[nome] || 0;
-  const prod   = _bancadaProducao[nome]   || { hoje: 0, semana: 0, mes: 0 };
-  const classDesde  = getClasseOcioso(mins);
-  const classHoje   = hoje   >= 120 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
-  const classSemana = semana >= 600 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
-  return '<div class="bancada-ocioso-wrap">' +
-    '<div class="' + classDesde  + '">Desde: '  + formatarTempo(mins)   + '</div>' +
-    '<div class="' + classHoje   + '">Hoje: '   + formatarTempo(hoje)   + '</div>' +
-    '<div class="' + classSemana + '">Semana: ' + formatarTempo(semana) + '</div>' +
-    '<div class="bancada-ocioso" style="margin-top:2px;font-size:0.5rem">Prod: ' + prod.hoje + 'd · ' + prod.semana + 's · ' + prod.mes + 'm</div>' +
-    '</div>';
-}
-
-function getClasseOcioso(minutos) {
-  return minutos >= 60 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
-}
-
-function atualizarOciosidade() {
-  TECNICOS_BANCADA.forEach(nome => {
-    const card = document.getElementById('bancada-' + nome);
-    if (!card || card.classList.contains('ocupado')) return;
-    const desde = _bancadaLivreDesde[nome];
-    if (!desde) return;
-    const mins = minutosUteisDesde(desde);
-    // Atualiza os elementos visuais
-    const wrap = card.querySelector('.bancada-ocioso-wrap');
-    if (wrap) {
-      const els = wrap.querySelectorAll('.bancada-ocioso');
-      if (els.length >= 3) {
-        const hoje   = _bancadaTotalHoje[nome]  || 0;
-        const semana = _bancadaMinsSemana[nome] || 0;
-        els[0].textContent = 'Desde: '  + formatarTempo(mins);
-        els[0].className = getClasseOcioso(mins);
-        els[1].textContent = 'Hoje: '   + formatarTempo(hoje);
-        els[1].className = hoje   >= 120 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
-        els[2].textContent = 'Semana: ' + formatarTempo(semana);
-        els[2].className = semana >= 600 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
-      }
-    }
-  });
-}
-
-// Grava periodicamente o tempo ocioso acumulado no Supabase
-// Isso garante que mesmo sem ficar ocupado, o total do dia é preservado
-async function gravarAcumuladoPeriodico() {
-  for (const nome of TECNICOS_BANCADA) {
-    const desde = _bancadaLivreDesde[nome];
-    if (!desde) continue;
-    const mins = minutosUteisDesde(desde);
-    if (mins <= 0) continue;
-    try {
-      // Grava o período atual como "livre_desde" atualizado — o backend recalcula ao ficar ocupado
-      // Aqui apenas atualizamos o timestamp para garantir que está salvo
-      await fetch(API + '/bancada-ocioso', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tecnico: nome, livre_desde: desde.toISOString() })
-      });
-    } catch(e) { /* silencioso */ }
-  }
-}
-
-// Atualiza o timer e grava acumulado a cada 60 segundos
-setInterval(() => {
-  atualizarTotalHoje();
-  gravarAcumuladoPeriodico();
-}, 60000);
-
-// Armazena tickets por técnico para alternância
-const _bancadaTickets = {};
-const _bancadaIndex   = {};
-const _bancadaTimers  = {};
-const BANCADA_INTERVAL_MS = 20000; // 20 segundos por ticket
-
-function showBancadaTicket(nome, idx) {
-  const card = document.getElementById('bancada-' + nome);
-  const meus = _bancadaTickets[nome] || [];
-  if (!card || meus.length === 0) return;
-  const i = idx % meus.length;
-  _bancadaIndex[nome] = i;
-  const t = meus[i];
-  const countBlock = '<div style="text-align:center"><div class="bancada-count">' + meus.length + '</div><div class="bancada-count-label">tickets</div></div>';
-  const infoBlock = '<div class="bancada-info">' +
-    '<div class="bancada-ticket">#' + t.ticketNumber + ' — ' + (t.subject || '') + '</div>' +
-    (t.productName ? '<div class="bancada-produto">' + t.productName + '</div>' : '') +
-    '<div class="bancada-statusbadge">' + t.status + ' · ' + (i+1) + '/' + meus.length + '</div>' +
-    '</div>';
-  card.innerHTML = '<div class="bancada-nome">' + nome + '</div>' + countBlock + infoBlock;
-}
-
-function startBancadaRotation(nome) {
-  if (_bancadaTimers[nome]) clearInterval(_bancadaTimers[nome]);
-  const meus = _bancadaTickets[nome] || [];
-  if (meus.length <= 1) return;
-  _bancadaTimers[nome] = setInterval(() => {
-    const next = ((_bancadaIndex[nome] || 0) + 1) % meus.length;
-    showBancadaTicket(nome, next);
-  }, BANCADA_INTERVAL_MS);
-}
-
-function renderBancada(tickets) {
-  const emBancada = tickets.filter(t => isBancada(t.status));
-  TECNICOS_BANCADA.forEach(nome => {
-    const card = document.getElementById('bancada-' + nome);
-    if (!card) return;
-    const meus = emBancada.filter(t =>
-      t.assignee && (t.assignee.firstName || '').toLowerCase() === nome.toLowerCase()
-    );
-    _bancadaTickets[nome] = meus;
-    if (meus.length === 0) {
-      if (_bancadaTimers[nome]) clearInterval(_bancadaTimers[nome]);
-      card.classList.remove('ocupado');
-      console.log('[BANCADA] ' + nome + ' disponível | livre_desde:', _bancadaLivreDesde[nome]);
-      if (!_bancadaLivreDesde[nome]) {
-        // Técnico ficou disponível agora — grava novo timestamp no Supabase
-        console.log('[BANCADA] ' + nome + ' sem timestamp — gravando novo no Supabase');
-        setBancadaLivre(nome);
-      } else {
-        // Já tem timestamp carregado do Supabase — só renderiza
-        const mins = minutosUteisDesde(_bancadaLivreDesde[nome]);
-        console.log('[BANCADA] ' + nome + ' renderizando com ' + mins + ' minutos');
-        card.innerHTML = '<div class="bancada-nome">' + nome + '</div>' +
-          '<div class="bancada-status disponivel">Disponível</div>' +
-          renderOciosoCard(nome, mins);
-      }
-    } else {
-      card.classList.add('ocupado');
-      _bancadaLivreDesde[nome] = null;
-      setBancadaOcupado(nome); // zera no Supabase
-      showBancadaTicket(nome, 0);
-      startBancadaRotation(nome);
-    }
-  });
-}
-
-let activeTab = 'teste';
-
-function buildTabs(counts) {
-  const tabs = document.getElementById('tabs');
-  if (!tabs) return;
-  tabs.innerHTML = GRUPOS.map(g =>
-    '<button class="tab-btn' + (g.id === activeTab ? ' active' : '') + '" onclick="switchTab(\'' + g.id + '\')">' +
-    g.label + '<span class="tab-count">' + (counts[g.id] || 0) + '</span></button>'
-  ).join('');
-}
-
-function switchTab(id) {
-  activeTab = id;
-  GRUPOS.forEach(g => {
-    const el = document.getElementById('col-wrap-' + g.id);
-    if (el) el.classList.toggle('active-tab', g.id === id);
-  });
-  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-    btn.classList.toggle('active', GRUPOS[i].id === id);
-  });
-}
-
-function renderCol(colId, tickets) {
-  const sorted = [...tickets].sort((a, b) => {
-    const ta = a.statusEntryTime ? new Date(a.statusEntryTime).getTime() : Date.now();
-    const tb = b.statusEntryTime ? new Date(b.statusEntryTime).getTime() : Date.now();
-    return ta - tb;
-  });
-
-  const col = document.getElementById('col-' + colId);
-  document.getElementById('cnt-' + colId).textContent = sorted.length;
-
-  let ok = 0, warn = 0, over = 0;
-  sorted.forEach(t => {
-    const cls = classTempo(t.statusEntryTime, t.status);
-    if (cls === 'time-green') ok++;
-    else if (cls === 'time-yellow') warn++;
-    else over++;
-  });
-
-  const stats = document.getElementById('stats-' + colId);
-  if (stats) {
-    stats.innerHTML =
-      '<div class="col-stat total"><div class="sv">' + sorted.length + '</div><div class="sl">Total</div></div>' +
-      '<div class="col-stat ok"><div class="sv">'   + ok   + '</div><div class="sl">Prazo</div></div>' +
-      '<div class="col-stat warn"><div class="sv">' + warn + '</div><div class="sl">Atenc.</div></div>' +
-      '<div class="col-stat over"><div class="sv">' + over + '</div><div class="sl">Venc.</div></div>';
-  }
-
-  if (sorted.length === 0) {
-    col.innerHTML = '<div class="empty">Nenhum ticket</div>';
-    return;
-  }
-
-  const showAgent = SHOW_AGENT.includes(colId);
-
-  col.innerHTML = sorted.map((t, i) => {
-    const tempo   = calcTempo(t.statusEntryTime);
-    const cls     = classTempo(t.statusEntryTime, t.status);
-    const title   = t.subject || ('#' + t.ticketNumber);
-    const agent   = getAgentName(t);
-    const agentHtml   = (showAgent && agent) ? '<div class="ticket-agent">&#128100; ' + agent + '</div>' : '';
-    const productHtml = t.productName
-      ? '<div class="ticket-product" style="overflow:hidden"><span class="prod-text">' + t.productName + '</span></div>'
-      : '';
-    return '<div class="ticket-card">' +
-      '<div class="ticket-info">' +
-        '<div class="ticket-rank">' + (i+1) + 'º · #' + t.ticketNumber + '</div>' +
-        '<div class="ticket-title">' + title + '</div>' +
-        agentHtml + productHtml +
-      '</div>' +
-      '<div class="ticket-time ' + cls + '">' + (tempo || '—') + '</div>' +
-    '</div>';
-  }).join('');
-}
-
-async function load() {
-  try {
-    const [ticketRes, closedRes] = await Promise.all([
-      fetch(API + '/tickets').then(r => r.json()),
-      fetch(API + '/closed-today').then(r => r.json())
-    ]);
-
-    const tickets = ticketRes.tickets || [];
-    const counts = {};
-
-    document.getElementById('k-total').textContent    = tickets.length;
-    document.getElementById('k-fechados').textContent = closedRes.count || 0;
-    document.getElementById('k-teste').textContent    = tickets.filter(t => norm(t.status) === 'aguardando teste').length;
-    document.getElementById('k-emteste').textContent  = tickets.filter(t => norm(t.status) === 'em teste').length;
-    document.getElementById('k-manut').textContent    = tickets.filter(t => norm(t.status) === 'em manutencao').length;
-    document.getElementById('k-estresse').textContent = tickets.filter(t => norm(t.status) === 'em teste de estresse/ciclo').length;
-    document.getElementById('k-peca').textContent     = tickets.filter(t => norm(t.status).includes('peca reposicao')).length;
-    document.getElementById('k-aprov').textContent    = tickets.filter(t => norm(t.status).includes('aprovacao de manutencao')).length;
-    document.getElementById('k-dev').textContent      = tickets.filter(t => norm(t.status).includes('devolucao cliente')).length;
-    document.getElementById('k-sg').textContent       = tickets.filter(t => norm(t.status) === 'aguardando manutencao (sg)').length;
-    document.getElementById('k-contato').textContent  = tickets.filter(t => norm(t.status).includes('aguardando 1') && norm(t.status).includes('contato')).length;
-
-    const outros = tickets.filter(t => !GRUPOS.some(g => g.match(t.status)));
-    document.getElementById('k-outros').textContent = outros.length;
-
-    GRUPOS.forEach(g => {
-      const grupo = tickets.filter(t => g.match(t.status));
-      counts[g.id] = grupo.length;
-      renderCol(g.id, grupo);
-    });
-
-    renderBancada(tickets);
-    checkAlerts(tickets);
-    detectarProducao(tickets);
-    buildTabs(counts);
-    if (window.innerWidth < 768) switchTab(activeTab);
-
-    document.getElementById('last-update').textContent = 'Atualizado ' + new Date().toLocaleTimeString('pt-BR');
-  } catch (e) {
-    const el = document.getElementById('last-update');
-    if (el) el.textContent = 'Erro: ' + e.message;
-    console.error(e);
-  }
-}
-
-setInterval(() => {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('pt-BR');
-}, 1000);
-
-if (window.innerWidth < 768) {
-  const el = document.getElementById('col-wrap-' + activeTab);
-  if (el) el.classList.add('active-tab');
-}
-
-Promise.all([carregarOciosidade(), carregarProducao()]).then(() => load());
-setInterval(load, 60000);
-
-// ── ALERTAS SONOROS ──
-// Guarda o estado de cor anterior de cada ticket para detectar mudanças
-const _ticketColorState = {};
-
-function playBeep(type) {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    if (type === 'yellow') {
-      // Alerta amarelo: 2 bips suaves (880Hz)
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.3);
-      // segundo bip
-      setTimeout(() => {
-        try {
-          const ctx2 = new (window.AudioContext || window.webkitAudioContext)();
-          const o2 = ctx2.createOscillator();
-          const g2 = ctx2.createGain();
-          o2.connect(g2); g2.connect(ctx2.destination);
-          o2.frequency.setValueAtTime(880, ctx2.currentTime);
-          g2.gain.setValueAtTime(0.3, ctx2.currentTime);
-          g2.gain.exponentialRampToValueAtTime(0.001, ctx2.currentTime + 0.3);
-          o2.start(ctx2.currentTime); o2.stop(ctx2.currentTime + 0.3);
-        } catch(e) {}
-      }, 400);
-    } else if (type === 'red') {
-      // Alerta vermelho: 3 bips urgentes (440Hz descendente)
-      [0, 0.4, 0.8].forEach((delay, i) => {
-        setTimeout(() => {
-          try {
-            const c = new (window.AudioContext || window.webkitAudioContext)();
-            const o = c.createOscillator();
-            const g = c.createGain();
-            o.connect(g); g.connect(c.destination);
-            o.frequency.setValueAtTime(440 - i * 40, c.currentTime);
-            g.gain.setValueAtTime(0.5, c.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.35);
-            o.start(c.currentTime); o.stop(c.currentTime + 0.35);
-          } catch(e) {}
-        }, delay * 1000);
-      });
-    }
-  } catch(e) {}
-}
-
-function checkAlerts(tickets) {
-  tickets.forEach(t => {
-    const id = t.ticketNumber;
-    const cls = classTempo(t.statusEntryTime, t.status);
-    const prev = _ticketColorState[id];
-    if (prev && prev !== cls) {
-      if (cls === 'time-yellow' && prev === 'time-green') playBeep('yellow');
-      if (cls === 'time-red'   && prev !== 'time-red')   playBeep('red');
-    }
-    _ticketColorState[id] = cls;
-  });
-}
-
-// Ativa marquee apenas nos produtos cujo texto transborda o container
-function activateMarquees() {
-  document.querySelectorAll('.ticket-product .prod-text').forEach(span => {
-    const parent = span.parentElement;
-    if (span.scrollWidth > parent.clientWidth) {
-      if (!span.classList.contains('scrolling')) {
-        // Duplica o texto para loop contínuo
-        span.textContent = span.textContent + '      ' + span.textContent;
-        span.classList.add('scrolling');
-      }
-    }
-  });
-}
-// Roda após cada atualização de dados (com pequeno delay para renderizar)
-const _origLoad = load;
-window._marqueeTimer = null;
-setInterval(() => {
-  clearTimeout(window._marqueeTimer);
-  window._marqueeTimer = setTimeout(activateMarquees, 300);
-}, 61000);
-setTimeout(activateMarquees, 800);
-
-// ── AUTO-SCROLL nas colunas ──
-const SCROLL_SPEED_PX = 1;    // px por tick
-const SCROLL_TICK_MS  = 30;   // intervalo do tick (ms) — menor = mais rápido
-const PAUSE_TOP_MS    = 3000; // pausa no topo
-const PAUSE_BOT_MS    = 2000; // pausa no final
-
-function startAutoScroll(el) {
-  if (el._autoScrollInterval) {
-    clearInterval(el._autoScrollInterval);
-    clearTimeout(el._autoScrollTimeout);
-  }
-  let paused = true;
-  let direction = 'down';
-
-  // Começa com pausa no topo
-  el.scrollTop = 0;
-  el._autoScrollTimeout = setTimeout(() => {
-    paused = false;
-    el._autoScrollInterval = setInterval(() => {
-      if (paused) return;
-      const maxScroll = el.scrollHeight - el.clientHeight;
-      if (maxScroll <= 5) return; // sem conteúdo suficiente
-
-      if (direction === 'down') {
-        el.scrollTop += SCROLL_SPEED_PX;
-        if (el.scrollTop >= maxScroll - 2) {
-          paused = true;
-          el._autoScrollTimeout = setTimeout(() => {
-            el.scrollTop = 0;
-            paused = true;
-            el._autoScrollTimeout = setTimeout(() => {
-              paused = false;
-            }, PAUSE_TOP_MS);
-          }, PAUSE_BOT_MS);
-        }
-      }
-    }, SCROLL_TICK_MS);
-  }, PAUSE_TOP_MS);
-}
-
-function initAutoScrolls() {
-  document.querySelectorAll('.col-body').forEach(el => {
-    startAutoScroll(el);
-  });
-}
-
-setTimeout(initAutoScrolls, 1500);
-setInterval(initAutoScrolls, 62000);</script>
+</div><!-- /tab-dados -->
+
+
+<!-- ═══ ABA: TÉCNICOS ═══ -->
+<div id="tab-tecnicos" class="tab-content">
+  <div class="section-header">Performance dos Técnicos</div>
+
+  <!-- KPIs -->
+  <div class="kpis" id="kpi-tecnicos"></div>
+
+  <!-- Gráfico 1: Hoje -->
+  <div class="panel yellow" style="margin-bottom:16px;">
+    <div class="panel-title">Tickets Finalizados Hoje <span>por técnico</span></div>
+    <div style="position:relative;height:200px;"><canvas id="chart-tecnicos-hoje"></canvas></div>
+  </div>
+
+  <!-- Gráfico 2+3: Período com toggle Semana/Mês/Trimestre/Ano + Donut sincronizado -->
+  <div class="grid2" style="margin-bottom:16px;">
+    <div class="panel blue" style="margin-bottom:0;">
+      <div class="panel-title">
+        Tickets Finalizados por Período
+        <div style="display:flex;gap:5px;margin-left:auto;">
+          <button class="tec-periodo-btn active" onclick="setTecPeriodo('semana',this)">Semana</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('mes',this)">Mês</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('trimestre',this)">Trimestre</button>
+          <button class="tec-periodo-btn" onclick="setTecPeriodo('ano',this)">Ano</button>
+        </div>
+      </div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-periodo"></canvas></div>
+    </div>
+
+    <!-- Gráfico donut — sincronizado com o toggle -->
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title">Distribuição <span id="donut-tec-label">por semana</span></div>
+      <div style="position:relative;height:300px;"><canvas id="chart-tecnicos-donut"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Tabela resumo por técnico × período -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Resumo por Técnico e Período</div>
+    <div style="overflow-x:auto;">
+      <table class="tbl" id="tbl-tecnicos" style="width:100%;">
+        <thead id="thead-tecnicos"></thead>
+        <tbody id="tbody-tecnicos"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tabela de tickets individuais — minimizável -->
+  <div class="panel" id="panel-tec-detalhes">
+    <div class="panel-title" style="cursor:pointer;" onclick="toggleTecDetalhes()">
+      Tickets Finalizados — Detalhes
+      <span style="margin-left:8px;font-size:11px;color:var(--gray2);">passou por: Aguardando laudo</span>
+      <span id="tec-detalhes-toggle-icon" style="margin-left:auto;font-size:16px;color:var(--gray2);">▼</span>
+    </div>
+    <div id="tec-detalhes-body">
+      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="filtro-tecnico" onchange="renderTecnicos()"
+          style="background:var(--bg3);border:1px solid var(--border);color:var(--white);padding:5px 10px;border-radius:4px;font-family:var(--font);font-size:13px;">
+          <option value="">Todos os técnicos</option>
+        </select>
+      </div>
+      <div style="overflow-x:auto;max-height:380px;overflow-y:auto;">
+        <table class="tbl" id="tbl-tecnicos-tickets" style="width:100%;font-size:12px;">
+          <thead><tr>
+            <th>Ticket #</th><th>Técnico</th><th>Produto</th>
+            <th class="num">Data</th><th class="num">Horas no Laudo</th>
+          </tr></thead>
+          <tbody id="tbody-tecnicos-tickets"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-tecnicos -->
+
+</main>
+
+<script src="app.js"></script>
 </body>
 </html>
-
-<script>
-// ── MODAL DIAGNÓSTICO ──
-let _diagClicks = 0;
-let _diagTimer  = null;
-
-document.querySelector('header img').style.cursor = 'pointer';
-document.querySelector('header img').addEventListener('click', () => {
-  _diagClicks++;
-  clearTimeout(_diagTimer);
-  if (_diagClicks >= 3) {
-    _diagClicks = 0;
-    abrirDiag();
-  } else {
-    _diagTimer = setTimeout(() => { _diagClicks = 0; }, 800);
-  }
-});
-
-function abrirDiag() {
-  document.getElementById('diagOverlay').classList.add('open');
-  carregarDiag();
-}
-
-function fecharDiag() {
-  document.getElementById('diagOverlay').classList.remove('open');
-}
-
-function fmtMins(m) {
-  if (!m || m <= 0) return '0m';
-  if (m < 60) return m + 'm';
-  return Math.floor(m/60) + 'h ' + (m%60) + 'm';
-}
-
-function fmtData(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
-}
-
-let _diagTabAtual = 'resumo';
-
-function switchDiagTab(tab, btn) {
-  _diagTabAtual = tab;
-  document.querySelectorAll('.diag-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  carregarDiag();
-}
-
-async function carregarDiag() {
-  const body = document.getElementById('diagBody');
-  body.innerHTML = '<div class="diag-loading">Buscando dados...</div>';
-  try {
-    if (_diagTabAtual === 'resumo') {
-      await carregarDiagResumo(body);
-    } else {
-      await carregarDiagEventos(body);
-    }
-  } catch(e) {
-    body.innerHTML = '<div class="diag-loading" style="color:var(--vermelho)">Erro: ' + e.message + '</div>';
-  }
-}
-
-async function carregarDiagResumo(body) {
-  const [ociosoRes, producaoRes] = await Promise.all([
-    fetch(API + '/bancada-ocioso').then(r => r.json()),
-    fetch(API + '/bancada-producao').then(r => r.json())
-  ]);
-  const ocioso   = ociosoRes.ociosidade || [];
-  const producao = producaoRes.producao || {};
-
-  let htmlOcioso = '<div class="diag-section-title">Ociosidade</div>';
-  htmlOcioso += '<table class="diag-table"><thead><tr>' +
-    '<th>Técnico</th><th>Disponível desde</th><th>Desde (útil)</th><th>Hoje</th><th>Semana</th>' +
-    '</tr></thead><tbody>';
-  ocioso.forEach(row => {
-    htmlOcioso += '<tr>' +
-      '<td class="diag-val-amarelo">' + row.tecnico + '</td>' +
-      '<td style="font-size:0.68rem;color:var(--text-sub)">' + fmtData(row.livre_desde) + '</td>' +
-      '<td class="diag-val-azul">'   + fmtMins(row.mins_desde  || 0) + '</td>' +
-      '<td class="diag-val-verde">'  + fmtMins(row.mins_hoje   || 0) + '</td>' +
-      '<td class="diag-val-amarelo">'+ fmtMins(row.mins_semana || 0) + '</td>' +
-      '</tr>';
-  });
-  htmlOcioso += '</tbody></table>';
-
-  let htmlProd = '<div class="diag-section-title">Produção</div>';
-  htmlProd += '<table class="diag-table"><thead><tr>' +
-    '<th>Técnico</th><th>Hoje</th><th>Semana</th><th>Mês</th>' +
-    '</tr></thead><tbody>';
-  TECNICOS_BANCADA.forEach(nome => {
-    const p = producao[nome] || { hoje: 0, semana: 0, mes: 0 };
-    htmlProd += '<tr>' +
-      '<td class="diag-val-amarelo">' + nome + '</td>' +
-      '<td class="diag-val-verde">' + p.hoje + '</td>' +
-      '<td class="diag-val-azul">' + p.semana + '</td>' +
-      '<td>' + p.mes + '</td>' +
-      '</tr>';
-  });
-  htmlProd += '</tbody></table>';
-
-  const ts = '<div style="font-size:0.6rem;color:var(--text-muted);text-align:right;margin-top:8px">Consultado em ' + new Date().toLocaleTimeString('pt-BR') + '</div>';
-  body.innerHTML = htmlOcioso + htmlProd + ts;
-}
-
-async function carregarDiagEventos(body) {
-  const r = await fetch(API + '/bancada-eventos').then(r => r.json());
-  const eventos = r.eventos || [];
-
-  if (eventos.length === 0) {
-    body.innerHTML = '<div class="diag-loading">Nenhum evento registrado ainda.</div>';
-    return;
-  }
-
-  // Agrupa por técnico
-  const porTecnico = {};
-  eventos.forEach(e => {
-    if (!porTecnico[e.tecnico]) porTecnico[e.tecnico] = [];
-    porTecnico[e.tecnico].push(e);
-  });
-
-  let html = '';
-  Object.keys(porTecnico).sort().forEach(tecnico => {
-    html += '<div class="diag-section-title" style="margin-top:12px">' + tecnico + '</div>';
-    html += '<table class="diag-table"><thead><tr>' +
-      '<th>Horário</th><th>Evento</th><th>Duração no estado</th>' +
-      '</tr></thead><tbody>';
-
-    const evs = porTecnico[tecnico]; // já vem ordenado desc
-    evs.forEach((e, i) => {
-      const cls   = e.evento === 'disponivel' ? 'evento-disponivel' : 'evento-ocupado';
-      const label = e.evento === 'disponivel' ? '● Disponível' : '● Ocupado';
-      // Calcula duração: diferença entre esse evento e o próximo (mais antigo)
-      let duracao = '—';
-      const proximo = evs[i + 1];
-      if (proximo) {
-        const diff = new Date(e.timestamp) - new Date(proximo.timestamp);
-        const mins = Math.floor(diff / 60000);
-        duracao = fmtMins(mins);
-      }
-      html += '<tr>' +
-        '<td style="color:var(--text-sub);font-size:0.7rem;white-space:nowrap">' + fmtData(e.timestamp) + '</td>' +
-        '<td class="' + cls + '">' + label + '</td>' +
-        '<td style="color:var(--text-sub);font-size:0.7rem">' + duracao + '</td>' +
-        '</tr>';
-    });
-    html += '</tbody></table>';
-  });
-
-  const ts = '<div style="font-size:0.6rem;color:var(--text-muted);text-align:right;margin-top:8px">Consultado em ' + new Date().toLocaleTimeString('pt-BR') + '</div>';
-  body.innerHTML = html + ts;
-}
-</script>
