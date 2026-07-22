@@ -771,6 +771,7 @@ async function setBancadaOcupado(nome) {
 }
 
 const _bancadaLivreDesde  = {}; // { 'Wendel': Date }
+const _bancadaMinsSemana  = {}; // { 'Wendel': minutos semana } — vem do backend
 const _bancadaTotalHoje    = {}; // { 'Wendel': minutos acumulados no dia }
 const _ticketsAnterior     = {}; // { ticketId: { status, assignee } } — estado anterior
 const _bancadaEstadoAnterior = {}; // { 'Wendel': 'disponivel' | 'ocupado' } — evita eventos duplicados
@@ -826,9 +827,8 @@ async function carregarOciosidade() {
     console.log('[OCIOSO] dados do Supabase:', JSON.stringify(data));
     (data.ociosidade || []).forEach(row => {
       _bancadaLivreDesde[row.tecnico] = row.livre_desde ? new Date(row.livre_desde) : null;
-      // O total do log NÃO inclui o período atual em andamento — calculamos separado
-      _bancadaTotalHoje[row.tecnico]  = row.minutos_hoje || 0;
-      console.log('[OCIOSO] ' + row.tecnico + ' -> livre_desde:', row.livre_desde, '| minutos_hoje:', row.minutos_hoje);
+      _bancadaTotalHoje[row.tecnico]  = row.mins_hoje    || 0;
+      _bancadaMinsSemana[row.tecnico] = row.mins_semana  || 0;
     });
   } catch(e) { console.error('carregarOciosidade error:', e); }
 }
@@ -839,7 +839,8 @@ async function atualizarTotalHoje() {
     const r = await fetch(API + '/bancada-ocioso');
     const data = await r.json();
     (data.ociosidade || []).forEach(row => {
-      _bancadaTotalHoje[row.tecnico] = row.minutos_hoje || 0;
+      _bancadaTotalHoje[row.tecnico]  = row.mins_hoje   || 0;
+      _bancadaMinsSemana[row.tecnico] = row.mins_semana || 0;
     });
     atualizarOciosidade();
   } catch(e) { /* silencioso */ }
@@ -850,41 +851,23 @@ async function atualizarTotalHoje() {
 
 
 function minutosUteisDesde(desde) {
+  // Calcula minutos úteis do período atual (09h-18h, seg-sex, só hoje)
   if (!desde) return 0;
-  const HORA_INI = 9, HORA_FIM = 18;
   const agora = new Date();
-
-  // Fim de semana — não conta
   const diaSemana = agora.getDay();
   if (diaSemana === 0 || diaSemana === 6) return 0;
 
-  // Início e fim do horário útil de hoje
-  const inicioDiaHoje = new Date(agora);
-  inicioDiaHoje.setHours(HORA_INI, 0, 0, 0);
-  inicioDiaHoje.setMinutes(0, 0, 0);
-  const fimDiaHoje = new Date(agora);
-  fimDiaHoje.setHours(HORA_FIM, 0, 0, 0);
-  fimDiaHoje.setMinutes(0, 0, 0);
+  const ini = new Date(agora); ini.setHours(9,  0, 0, 0);
+  const fim = new Date(agora); fim.setHours(18, 0, 0, 0);
+  if (agora <= ini) return 0;
 
-  // Se ainda não chegou no horário útil, retorna 0
-  if (agora <= inicioDiaHoje) return 0;
-
-  // Garante que livre_desde é um Date válido
   const livreDesde = desde instanceof Date ? desde : new Date(desde);
   if (isNaN(livreDesde.getTime())) return 0;
 
-  console.log('[minutosUteisDesde] desde:', livreDesde.toISOString(), '| inicioDia:', inicioDiaHoje.toISOString());
-
-  // Início efetivo: maior entre livre_desde e 09h de hoje
-  const inicioEfetivo = livreDesde.getTime() > inicioDiaHoje.getTime() ? livreDesde : inicioDiaHoje;
-
-  // Fim efetivo: menor entre agora e 18h de hoje
-  const fimEfetivo = agora.getTime() < fimDiaHoje.getTime() ? agora : fimDiaHoje;
-
-  console.log('[minutosUteisDesde] inicioEfetivo:', inicioEfetivo.toISOString(), '| fimEfetivo:', fimEfetivo.toISOString());
-
-  if (fimEfetivo <= inicioEfetivo) return 0;
-  return Math.floor((fimEfetivo - inicioEfetivo) / 60000);
+  const inicio = livreDesde > ini ? livreDesde : ini;
+  const final  = agora < fim ? agora : fim;
+  if (final <= inicio) return 0;
+  return Math.floor((final - inicio) / 60000);
 }
 
 function formatarTempo(minutos) {
@@ -901,16 +884,17 @@ function formatarOciosidade(minutos) {
 }
 
 function renderOciosoCard(nome, mins) {
-  // _bancadaTotalHoje já vem do backend com base + período atual calculado
-  // Usamos diretamente sem somar de novo o período atual
-  const total = _bancadaTotalHoje[nome] || mins;
-  const classeAtual = getClasseOcioso(mins);
-  const classeTotal = total >= 120 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
-  const prod = _bancadaProducao[nome] || { hoje: 0, semana: 0, mes: 0 };
+  const hoje   = _bancadaTotalHoje[nome]  || 0;
+  const semana = _bancadaMinsSemana[nome] || 0;
+  const prod   = _bancadaProducao[nome]   || { hoje: 0, semana: 0, mes: 0 };
+  const classDesde  = getClasseOcioso(mins);
+  const classHoje   = hoje   >= 120 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
+  const classSemana = semana >= 600 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
   return '<div class="bancada-ocioso-wrap">' +
-    '<div class="' + classeAtual + '">Disponível: ' + formatarTempo(mins) + '</div>' +
-    '<div class="' + classeTotal + '">Total disponível: ' + formatarTempo(total) + '</div>' +
-    '<div class="bancada-ocioso" style="margin-top:2px">Prod: ' + prod.hoje + 'h · ' + prod.semana + 's · ' + prod.mes + 'm</div>' +
+    '<div class="' + classDesde  + '">Desde: '  + formatarTempo(mins)   + '</div>' +
+    '<div class="' + classHoje   + '">Hoje: '   + formatarTempo(hoje)   + '</div>' +
+    '<div class="' + classSemana + '">Semana: ' + formatarTempo(semana) + '</div>' +
+    '<div class="bancada-ocioso" style="margin-top:2px;font-size:0.5rem">Prod: ' + prod.hoje + 'd · ' + prod.semana + 's · ' + prod.mes + 'm</div>' +
     '</div>';
 }
 
@@ -928,13 +912,16 @@ function atualizarOciosidade() {
     // Atualiza os elementos visuais
     const wrap = card.querySelector('.bancada-ocioso-wrap');
     if (wrap) {
-      const total = _bancadaTotalHoje[nome] || mins;
       const els = wrap.querySelectorAll('.bancada-ocioso');
-      if (els.length >= 2) {
-        els[0].textContent = 'Disponível: ' + formatarTempo(mins);
+      if (els.length >= 3) {
+        const hoje   = _bancadaTotalHoje[nome]  || 0;
+        const semana = _bancadaMinsSemana[nome] || 0;
+        els[0].textContent = 'Desde: '  + formatarTempo(mins);
         els[0].className = getClasseOcioso(mins);
-        els[1].textContent = 'Total disponível: ' + formatarTempo(total);
-        els[1].className = total >= 120 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
+        els[1].textContent = 'Hoje: '   + formatarTempo(hoje);
+        els[1].className = hoje   >= 120 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
+        els[2].textContent = 'Semana: ' + formatarTempo(semana);
+        els[2].className = semana >= 600 ? 'bancada-ocioso alerta' : 'bancada-ocioso';
       }
     }
   });
@@ -1375,18 +1362,15 @@ async function carregarDiagResumo(body) {
 
   let htmlOcioso = '<div class="diag-section-title">Ociosidade</div>';
   htmlOcioso += '<table class="diag-table"><thead><tr>' +
-    '<th>Técnico</th><th>Disponível desde</th><th>Período atual</th><th>Base acumulada</th><th>Total hoje</th>' +
+    '<th>Técnico</th><th>Disponível desde</th><th>Desde (útil)</th><th>Hoje</th><th>Semana</th>' +
     '</tr></thead><tbody>';
   ocioso.forEach(row => {
-    const local = _bancadaLivreDesde[row.tecnico];
-    const minsAtual = local ? minutosUteisDesde(local) : 0;
-    const base = Math.max(0, (row.minutos_hoje || 0) - minsAtual);
     htmlOcioso += '<tr>' +
       '<td class="diag-val-amarelo">' + row.tecnico + '</td>' +
-      '<td>' + fmtData(row.livre_desde) + '</td>' +
-      '<td class="diag-val-azul">' + fmtMins(minsAtual) + '</td>' +
-      '<td>' + fmtMins(base) + '</td>' +
-      '<td class="diag-val-verde">' + fmtMins(row.minutos_hoje || 0) + '</td>' +
+      '<td style="font-size:0.68rem;color:var(--text-sub)">' + fmtData(row.livre_desde) + '</td>' +
+      '<td class="diag-val-azul">'   + fmtMins(row.mins_desde  || 0) + '</td>' +
+      '<td class="diag-val-verde">'  + fmtMins(row.mins_hoje   || 0) + '</td>' +
+      '<td class="diag-val-amarelo">'+ fmtMins(row.mins_semana || 0) + '</td>' +
       '</tr>';
   });
   htmlOcioso += '</tbody></table>';
