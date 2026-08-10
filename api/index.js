@@ -619,7 +619,7 @@ app.get('/api/sankhya-vendas', async (req, res) => {
 
     const fromDate = new Date(from);
     const toDate   = new Date(to);
-    const MAX_DIAS = 58; // margem de segurança abaixo de 60
+    const MAX_DIAS = 55; // margem de segurança abaixo de 60
 
     // Divide o período em janelas de MAX_DIAS dias
     const janelas = [];
