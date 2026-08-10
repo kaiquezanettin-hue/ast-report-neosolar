@@ -62,7 +62,9 @@ function setPeriod(days) {
   if (id) document.getElementById(id).classList.add('active');
 }
 function setPeriodAll() {
-  document.getElementById('date-from').value = '2022-01-01';
+  const from = new Date();
+  from.setFullYear(from.getFullYear() - 2);
+  document.getElementById('date-from').value = from.toISOString().slice(0, 10);
   document.getElementById('date-to').value = new Date().toISOString().slice(0, 10);
   document.querySelectorAll('.period-shortcuts button').forEach(b => b.classList.remove('active'));
   document.getElementById('sh-all').classList.add('active');
@@ -1016,24 +1018,50 @@ function renderTecnicos() {
 // SANKHYA VENDAS — busca via n8n e cruza com RMA pelo SKU
 // ════════════════════════════════════════════════════════════════════
 async function fetchSankhyaVendas() {
-  const from = document.getElementById('date-from').value;
-  const to   = document.getElementById('date-to').value;
-  if (!from || !to) return;
-  try {
-    const res  = await fetch(`/api/sankhya-vendas?from=${from}&to=${to}`);
-    const data = await res.json();
-    if (!data.ok) { console.warn('[sankhya-vendas]', data.error); return; }
-    // Indexa por SKU para cruzamento rápido
-    sankhyaVendas = {};
-    for (const item of data.data || []) {
-      sankhyaVendas[String(item.sku).trim()] = item;
-    }
-    console.log(`[sankhya-vendas] ${data.totalSkus} SKUs carregados`);
-    // Atualiza gráficos da aba Produtos se estiver ativa
-    if (window._lastReportData) renderComparativoVendas();
-  } catch (e) {
-    console.warn('[sankhya-vendas] erro:', e.message);
+  // Busca os últimos 2 anos em semestres para evitar timeout do Vercel
+  const hoje = new Date();
+  const semestres = [];
+  for (let i = 0; i < 4; i++) {
+    const toSem   = new Date(hoje);
+    toSem.setMonth(toSem.getMonth() - (i * 6));
+    const fromSem = new Date(toSem);
+    fromSem.setMonth(fromSem.getMonth() - 6);
+    semestres.push({
+      from: fromSem.toISOString().slice(0, 10),
+      to:   toSem.toISOString().slice(0, 10)
+    });
   }
+
+  sankhyaVendas = {};
+  let totalSkus = 0;
+
+  for (const sem of semestres) {
+    try {
+      const res  = await fetch(`/api/sankhya-vendas?from=${sem.from}&to=${sem.to}`);
+      const data = await res.json();
+      if (!data.ok) { console.warn('[sankhya-vendas]', data.error); continue; }
+
+      // Agrega por SKU — soma quantidades de períodos diferentes
+      for (const item of data.data || []) {
+        const sku = String(item.sku).trim();
+        if (!sankhyaVendas[sku]) {
+          sankhyaVendas[sku] = { ...item };
+        } else {
+          sankhyaVendas[sku].quantidade  += item.quantidade;
+          sankhyaVendas[sku].faturamento += item.faturamento;
+        }
+      }
+      totalSkus = Object.keys(sankhyaVendas).length;
+      console.log(`[sankhya-vendas] ${sem.from}→${sem.to}: ${data.totalSkus} SKUs | Total: ${totalSkus}`);
+
+      // Renderiza após cada semestre carregado
+      if (window._lastReportData) renderComparativoVendas();
+
+    } catch (e) {
+      console.warn(`[sankhya-vendas] erro semestre ${sem.from}→${sem.to}:`, e.message);
+    }
+  }
+  console.log(`[sankhya-vendas] Concluído — ${totalSkus} SKUs únicos em 2 anos`);
 }
 
 function renderComparativoVendas() {
