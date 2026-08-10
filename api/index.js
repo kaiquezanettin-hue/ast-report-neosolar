@@ -645,7 +645,14 @@ app.get('/api/sankhya-vendas', async (req, res) => {
         const r = await axios.post(
           'https://n8n.neosolar.com.br/webhook/faturamento-por-produto',
           { ...janela, offset, page_size: 5000 },
-          { headers: { Authorization: `Bearer ${N8N_TOKEN}`, 'Content-Type': 'application/json' }, timeout: 30000 }
+          {
+            headers: {
+              Authorization: `Bearer ${N8N_TOKEN}`,
+              'Content-Type': 'application/json',
+              'CF-Access-Client-Id': process.env.CF_ACCESS_CLIENT_ID || ''
+            },
+            timeout: 30000
+          }
         );
         const itens = r.data || [];
         todosItens.push(...itens);
